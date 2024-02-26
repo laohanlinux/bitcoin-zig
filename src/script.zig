@@ -253,9 +253,35 @@ pub const OpCodeType = enum(u16) {
     }
 };
 
+fn writeScriptInt(out: []u8, n: i64) u32 {
+    var len: u32 = 0;
+    if (n == 0) {
+        return 0;
+    }
+    const neg: bool = n < 0;
+    var abs: usize = if (neg) std.math.absCast(n) else @intCast(n);
+    while (abs > 0xFF) : ({
+        abs >>= 8;
+        len += 1;
+    }) {
+        out[len] = @as(u8, @intCast(abs & 0xFF));
+    }
+    if (abs & 0x80 != 0) {
+        out[len] = @as(u8, @intCast(abs));
+        len += 1;
+        out[len] = if (neg) 0x80 else 0;
+        len += 1;
+    } else {
+        abs |= if (neg) 0x80 else 0;
+        out[len] = @as(u8, @intCast(abs));
+        len += 1;
+    }
+    return len;
+}
+
 pub const Script = struct {
     const Self = @This();
-    vec: []u8,
+    vec: std.ArrayList(u8),
 
     pub fn value_string(self: *Self, vch: []const u8) []const u8 {
         if (vch.len <= 4) {
@@ -265,12 +291,21 @@ pub const Script = struct {
         _ = self;
         return "";
     }
+
+    pub fn put_int(self: *Self, i: i64) void {
+        _ = i;
+        _ = self;
+
+    }
 };
 
 test "Script OpTye" {
     const name = OpCodeType.OP_PUSHDATA1.get_op_name();
     std.debug.print("{s}\n", .{name});
+    var buffer: [8]u8 = undefined;
 
-    //    var script = Script{ .vec = undefined };
-    //  script.vec.append(100);
+    // Test positive number
+    const len1 = writeScriptInt(buffer[0..], 899);
+
+    std.debug.print("{d} {d}\n", .{len1, buffer});
 }
