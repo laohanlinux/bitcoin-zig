@@ -15,6 +15,9 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const opts = .{ .target = target, .optimize = optimize };
+    const base58 = b.dependency("base58-zig", opts).module("base58-zig");
+
     const exe = b.addExecutable(.{
         .name = "bitcoin-zig",
         // In this case the main source file is merely a path, however, in more
@@ -23,6 +26,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    exe.addModule("base58-zig", base58);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

@@ -18,14 +18,25 @@ pub const TxIn = struct {
     const self = @This();
 };
 
+//
 pub const OutPoint = struct {
     n: isize,
     hash: big.int.Const,
+    allocator: std.mem.Allocator,
     const Self = @This();
+    pub fn new(n: isize, allocator: std.mem.Allocator) !Self {
+        const m = big.int.Managed.initSet(allocator, 0) catch unreachable;
+        return Self{ .hash = m.toConst(), .n = n, .allocator = allocator };
+    }
 
     pub fn set_null(self: *Self) void {
         self.n = -1;
-        self.hash = big.Const(0);
+        const m = big.int.Managed.initSet(self.allocator, 0) catch unreachable;
+        self.hash = m.toConst();
+    }
+
+    pub fn is_null(self: *Self) bool {
+        return (self.n == -1 and self.hash.eqlZero());
     }
 };
 
@@ -45,4 +56,8 @@ test "bigint" {
 
     try a.mul(&a, &b);
     std.debug.print("{any}\n", .{a});
+    var out = try OutPoint.new(0, gpa.allocator());
+    std.debug.print("{any}\n", .{out.is_null()});
+    out.set_null();
+    std.debug.print("{any}\n", .{out.is_null()});
 }
