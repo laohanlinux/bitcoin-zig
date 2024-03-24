@@ -2,7 +2,7 @@ const std = @import("std");
 const b58 = @import("base58-zig");
 const base58 = @import("./base58.zig");
 const allocator = std.heap.page_allocator;
-
+const hash16 = @import("./ripemd160block.zig");
 pub fn main() !void {
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
