@@ -1,4 +1,4 @@
-const b58 = @import("base58-zig");
+const b58 = @import("./base58/lib.zig");
 const std = @import("std");
 
 pub const Encoder58 = struct {

@@ -1,8 +1,8 @@
 const std = @import("std");
-const b58 = @import("base58-zig");
 const base58 = @import("./base58.zig");
 const allocator = std.heap.page_allocator;
-const hash16 = @import("./ripemd160block.zig");
+const ripemd160 = @import("./libcrypto/ripemd160.zig");
+const crypto = @import("./libcrypto/crypto.zig");
 pub fn main() !void {
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
@@ -27,7 +27,7 @@ pub fn main() !void {
         235, 82,  175, 197, 144, 145,
     };
     //b58.Decoder.decodeAlloc(self: *const Self, allocator: std.mem.Allocator, encoded: []const u8)
-    var encodedVal = "4rL4RCWHz3iNCdCaveD8KcHfV9YWGsqSHFPo7X2zBNwa";
+    const encodedVal = "4rL4RCWHz3iNCdCaveD8KcHfV9YWGsqSHFPo7X2zBNwa";
 
     var decoder = base58.Decoder58.init(encodedVal);
     const decodedValue = decoder.decodeAlloc(allocator) catch unreachable;
