@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const OpCodeType = enum(u16) {
+pub const OpCodeType = enum(u8) {
     // push value
     OP_0 = 0,
     //OP_FALSE = 0,
@@ -251,6 +251,10 @@ pub const OpCodeType = enum(u16) {
             else => return "UNKNOWN_OPCODE",
         }
     }
+
+    pub fn to_u8(self: OpCodeType) u8 {
+        return self;
+    }
 };
 
 fn writeScriptInt(out: []u8, n: i64) u32 {
@@ -283,6 +287,15 @@ pub const Script = struct {
     const Self = @This();
     vec: std.ArrayList(u8),
 
+    pub fn init() Self {
+        const vec = std.ArrayList(u8).init(std.heap.page_allocator);
+        return .{ .vec = vec };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.vec.deinit();
+    }
+
     pub fn value_string(self: *Self, vch: []const u8) []const u8 {
         if (vch.len <= 4) {
             const num = std.big.Int.fromSlice(std.big.IntSignedness.Signed, vch, std.big.LittleEndian, .{});
@@ -295,7 +308,50 @@ pub const Script = struct {
     pub fn put_int(self: *Self, i: i64) void {
         _ = i;
         _ = self;
+    }
 
+    pub fn push_slice(self: *Self, data: []u8) void {
+        // cals data size
+        const data_len = data.len;
+    }
+
+    pub fn put_code(self: *Self, code: OpCodeType) void {
+        self.vec.append(code.to_u8());
+    }
+};
+
+pub const ScriptBuilder = struct {
+    const Self = @This();
+    script: Script,
+    opCode: ?OpCodeType,
+    pub fn init() Self {
+        const script = Script.init();
+        return .{ .scritp = script, .opCode = null };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.script.deinit();
+    }
+
+    pub fn push_int(self: *Self, i: i64) void {
+        self.script.put_int(i);
+    }
+
+    pub fn len(self: *Self) u32 {
+        return self.script.vec.items.len();
+    }
+
+    pub fn is_empty(self: *Self) bool {
+        return self.len() == 0;
+    }
+
+    pub fn push_slice(self: *Self, data: []u8) void {
+        // self.script.pu
+    }
+
+    pub fn push_opcode(self: *Self, opCode: OpCodeType) void {
+        self.script.put_code(opCode);
+        self.opCode.? = opCode;
     }
 };
 
@@ -307,5 +363,5 @@ test "Script OpTye" {
     // Test positive number
     const len1 = writeScriptInt(buffer[0..], 899);
 
-    std.debug.print("{d} {d}\n", .{len1, buffer});
+    std.debug.print("{d} {d}\n", .{ len1, buffer });
 }

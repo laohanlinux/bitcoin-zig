@@ -3,6 +3,7 @@ const base58 = @import("./base58.zig");
 const allocator = std.heap.page_allocator;
 const ripemd160 = @import("./libcrypto/ripemd160.zig");
 const crypto = @import("./libcrypto/crypto.zig");
+const script = @import("./script.zig");
 pub fn main() !void {
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
