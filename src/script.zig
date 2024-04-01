@@ -312,12 +312,40 @@ pub const Script = struct {
 
     pub fn push_slice(self: *Self, data: []u8) void {
         // cals data size
-        const data_len = data.len;
+        // const data_len = data.len;
     }
 
     pub fn put_code(self: *Self, code: OpCodeType) void {
         self.vec.append(code.to_u8());
     }
+
+    /// Pushes the slice without reserving.
+    pub fn push_slice_no_opt(self: *Self, data: []u8) void {
+        // Start with a PUSH opcode
+        if (data.len < OpCodeType.OP_PUSHDATA1) {
+            self.vec.append(@as(u8, data.len));
+        } else if (data.len < 0x100) {
+            self.vec.append(OpCodeType.OP_PUSHDATA1.to_u8());
+            self.vec.append(@as(u8, data.len));
+        } else if (data.len < 0x10000) {
+            self.vec.append(OpCodeType.OP_PUSHDATA2.to_u8());
+            self.vec.append(@as(u8, data.len % 0x100));
+            self.vec.append(@as(u8, data.len / 0x100));
+        } else if (data.len < 0x1000000) {
+            self.vec.append(OpCodeType.OP_PUSHDATA4.to_u8());
+            self.vec.append(@as(u8, data.len % 0x100));
+        } else {}
+    }
+
+    // Computes the sum of `len` and the length of an appropriate push opcode.
+    // pub fn reserved_len_for_slice(len: usize) usize {
+    //     const _len = switch (len) {
+    //         0...0x4b => 1,
+    //         0x4c...0xff => 2,
+    //         else => 5, // we don't care about oversized, the other fn will panic anyway
+    //     };
+    //     return len + _len;
+    // }
 };
 
 pub const ScriptBuilder = struct {
