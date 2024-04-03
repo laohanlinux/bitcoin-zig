@@ -1,6 +1,7 @@
 const std = @import("std");
+const convert = @import("./convert.zig");
 
-pub const OpCodeType = enum(u8) {
+pub const OpCodeType = enum(u16) {
     // push value
     OP_0 = 0,
     //OP_FALSE = 0,
@@ -253,7 +254,11 @@ pub const OpCodeType = enum(u8) {
     }
 
     pub fn to_u8(self: OpCodeType) u8 {
-        return self;
+        return convert.usizeToU8(self.to_usize());
+    }
+
+    pub fn to_usize(self: OpCodeType) usize {
+        return @intFromEnum(self);
     }
 };
 
@@ -263,7 +268,7 @@ fn writeScriptInt(out: []u8, n: i64) u32 {
         return 0;
     }
     const neg: bool = n < 0;
-    var abs: usize = if (neg) std.math.absCast(n) else @intCast(n);
+    var abs: usize = if (neg) @intCast(n * -1) else @intCast(n);
     while (abs > 0xFF) : ({
         abs >>= 8;
         len += 1;
@@ -310,31 +315,38 @@ pub const Script = struct {
         _ = self;
     }
 
-    pub fn push_slice(self: *Self, data: []u8) void {
-        // cals data size
-        // const data_len = data.len;
-    }
+    // pub fn push_slice(self: *Self, data: []u8) void {
+    //     // cals data size
+    //     // const data_len = data.len;
+    // }
 
     pub fn put_code(self: *Self, code: OpCodeType) void {
         self.vec.append(code.to_u8());
     }
 
     /// Pushes the slice without reserving.
-    pub fn push_slice_no_opt(self: *Self, data: []u8) void {
+    pub fn push_slice_no_opt(self: *Self, data: []const u8) void {
         // Start with a PUSH opcode
-        if (data.len < OpCodeType.OP_PUSHDATA1) {
-            self.vec.append(@as(u8, data.len));
+        if (data.len < OpCodeType.OP_PUSHDATA1.to_usize()) {
+            const len = @as(u8, @truncate(data.len));
+            self.vec.append(len) catch unreachable;
         } else if (data.len < 0x100) {
-            self.vec.append(OpCodeType.OP_PUSHDATA1.to_u8());
-            self.vec.append(@as(u8, data.len));
+            self.vec.append(OpCodeType.OP_PUSHDATA1.to_u8()) catch unreachable;
+            self.vec.append(convert.usizeToU8(data.len)) catch unreachable;
         } else if (data.len < 0x10000) {
-            self.vec.append(OpCodeType.OP_PUSHDATA2.to_u8());
-            self.vec.append(@as(u8, data.len % 0x100));
-            self.vec.append(@as(u8, data.len / 0x100));
+            self.vec.append(OpCodeType.OP_PUSHDATA2.to_u8()) catch unreachable;
+            self.vec.append(convert.usizeToU8(data.len % 0x100)) catch unreachable;
+            self.vec.append(convert.usizeToU8(data.len / 0x100)) catch unreachable;
         } else if (data.len < 0x1000000) {
-            self.vec.append(OpCodeType.OP_PUSHDATA4.to_u8());
-            self.vec.append(@as(u8, data.len % 0x100));
-        } else {}
+            self.vec.append(OpCodeType.OP_PUSHDATA4.to_u8()) catch unreachable;
+            self.vec.append(convert.usizeToU8(data.len % 0x100)) catch unreachable;
+            self.vec.append(convert.usizeToU8((data.len / 0x100) % 100)) catch unreachable;
+            self.vec.append(convert.usizeToU8((data.len / 0x10000) % 100)) catch unreachable;
+            self.vec.append(convert.usizeToU8(data.len / 0x1000000)) catch unreachable;
+        } else {
+            @panic("tried to put a 4bn+ sized object into a script!");
+        }
+        self.vec.appendSlice(data) catch unreachable;
     }
 
     // Computes the sum of `len` and the length of an appropriate push opcode.
@@ -373,14 +385,27 @@ pub const ScriptBuilder = struct {
         return self.len() == 0;
     }
 
-    pub fn push_slice(self: *Self, data: []u8) void {
-        // self.script.pu
-    }
+    // pub fn push_slice(self: *Self, data: []u8) void {
+    //     // self.script.pu
+    // }
 
     pub fn push_opcode(self: *Self, opCode: OpCodeType) void {
         self.script.put_code(opCode);
         self.opCode.? = opCode;
     }
+};
+
+/// Data pushed by "push" opcodes.
+///
+/// "Push" opcodes are defined by Bitcoin Core as Op_PUSHBYTES_, OP_PUSHDATA, OP_PUSHNUM_, and
+/// OP_RESERVED i.e., everything less than OP_PUSHNUM_16(0x60). (TODO: Add link to core code).
+const Push = union {
+    /// All the OP_PUSHBYTES_ and OP_PUSHDATA opcodes.
+    data: []u8,
+    /// All the OP_PUSHNUM_ opcodes (-1, 1, 2, .., 16)
+    num: i8,
+    /// OP_RESERVED
+    Reserved: void,
 };
 
 test "Script OpTye" {
@@ -392,4 +417,9 @@ test "Script OpTye" {
     const len1 = writeScriptInt(buffer[0..], 899);
 
     std.debug.print("{d} {d}\n", .{ len1, buffer });
+
+    var script = Script.init();
+    script.put_int(899);
+    const data: [:0]const u8 = "hello word!";
+    script.push_slice_no_opt(data);
 }
