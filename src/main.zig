@@ -3,7 +3,10 @@ const base58 = @import("./base58.zig");
 const allocator = std.heap.page_allocator;
 const ripemd160 = @import("./libcrypto/ripemd160.zig");
 const crypto = @import("./libcrypto/crypto.zig");
-const script = @import("./script.zig");
+const script = @import("./blockdata/script/script.zig");
+const instr = @import("./blockdata/script/instruction.zig");
+const script_lib = @import("./blockdata/script/lib.zig");
+
 pub fn main() !void {
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
@@ -35,6 +38,28 @@ pub fn main() !void {
     defer allocator.free(decodedValue);
     if (std.mem.eql(u8, decodedValue, &original) == false) {
         @panic("");
+    }
+
+    {
+        {
+            const instruction = instr.Instruction{ .op = script.OpCodeType.OP_0 };
+            const opType = instruction.opcode();
+            std.debug.print("{any}\n", .{opType});
+        }
+
+        {
+            var instruction = instr.Instruction{ .pushBytes = std.ArrayList(u8).init(allocator) };
+            defer instruction.deinit();
+            instruction.push_bytes("abc");
+            const bytes = instruction.bytes().?;
+            std.debug.print("{s}\n", .{bytes});
+        }
+
+        {
+            const v = .{ 0x1, 0x2, 0x3 };
+            const n = script_lib.read_scriptint_non_minimal(&v) catch unreachable;
+            std.debug.print("{d}", .{n});
+        }
     }
     try bw.flush(); // don't forget to flush!
 }

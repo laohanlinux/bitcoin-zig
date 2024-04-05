@@ -1,5 +1,5 @@
 const std = @import("std");
-const convert = @import("./convert.zig");
+const convert = @import("tools").usizeToU8;
 
 pub const OpCodeType = enum(u16) {
     // push value
@@ -399,13 +399,23 @@ pub const ScriptBuilder = struct {
 ///
 /// "Push" opcodes are defined by Bitcoin Core as Op_PUSHBYTES_, OP_PUSHDATA, OP_PUSHNUM_, and
 /// OP_RESERVED i.e., everything less than OP_PUSHNUM_16(0x60). (TODO: Add link to core code).
-const Push = union {
+const Push = union(enum) {
     /// All the OP_PUSHBYTES_ and OP_PUSHDATA opcodes.
     data: []u8,
     /// All the OP_PUSHNUM_ opcodes (-1, 1, 2, .., 16)
     num: i8,
     /// OP_RESERVED
     Reserved: void,
+
+    const Self = @This();
+
+    pub fn to_string(self: Self) []const u8 {
+        switch (self) {
+            .data => return "the data type",
+            .num => return "the num type",
+            .Reserved => return "the reserved type",
+        }
+    }
 };
 
 test "Script OpTye" {
@@ -422,4 +432,7 @@ test "Script OpTye" {
     script.put_int(899);
     const data: [:0]const u8 = "hello word!";
     script.push_slice_no_opt(data);
+
+    const str = Push{ .num = 10 };
+    std.debug.print("{s}\n", .{str.to_string()});
 }

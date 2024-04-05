@@ -29,6 +29,8 @@ pub fn build(b: *std.Build) void {
     // running `zig build`).
     b.installArtifact(lib);
 
+    const tools = b.addModule("tools", .{ .root_source_file = .{ .path = "src/tools" } });
+    _ = tools;
     const exe = b.addExecutable(.{
         .name = "bitcoin-zig",
         .root_source_file = .{ .path = "src/main.zig" },

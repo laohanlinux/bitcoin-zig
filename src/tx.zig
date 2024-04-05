@@ -1,6 +1,6 @@
 const std = @import("std");
 const big = @import("std").math.big;
-const script = @import("./script.zig");
+const script = @import("./blockdata/script/script.zig");
 
 //
 // The basic transation that is broadcasted on the network and contained in
