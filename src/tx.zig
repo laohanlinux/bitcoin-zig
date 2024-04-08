@@ -122,3 +122,32 @@ test "bigint" {
     defer std.testing.allocator.free(out_str);
     std.debug.print("{s}\n", .{out_str});
 }
+
+test "self allocator" {
+    const Person = struct {
+        name: [10]u8,
+        address: std.ArrayList(u8),
+        const Self = @This();
+
+        fn init() !*Self {
+            const p = try std.testing.allocator.create(Self);
+            p.* = .{
+                .name = [10]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 },
+                .address = std.ArrayList(u8).init(std.testing.allocator),
+            };
+            //p.address.appendSlice("hello word") catch unreachable;
+            return p;
+        }
+
+        fn deinit(self: *Self) void {
+            self.address.deinit();
+            std.testing.allocator.destroy(self);
+        }
+    };
+    const e = Person.init() catch unreachable;
+    e.address.appendSlice("hello word") catch unreachable;
+
+    e.deinit();
+
+    //std.debug.print("{s}\n", .{p.address.items});
+}
