@@ -1,3 +1,5 @@
+const std = @import("std");
+
 const ScriptError = error{
     /// Something did a non-minimal push; for more information see
     /// <https://github.com/bitcoin/bips/blob/master/bip-0062.mediawiki#push-operators>
@@ -39,20 +41,35 @@ pub fn read_scriptint_non_minimal(v: []const u8) !i64 {
 }
 
 fn scriptint_parse(v: []const u8) i64 {
-    var ret: i64 = 0;
-    var sh: i32 = 0;
-    const len = v.len;
-    for (v) |n| {
-        const move_n = @as(i64, n);
-        //const left_low = @as(i64, sh);
-        ret += (move_n << 1);
-        sh += 8;
+    // var ret: i64 = 0;
+    // var sh: i32 = 0;
+    // const len = v.len;
+    // for (v) |n| {
+    //     const move_n = @as(i64, n);
+    //     //const left_low = @as(i64, sh);
+    //     ret += (move_n << 1);
+    //     sh += 8;
+    // }
+    //
+    // if (v[len - 1] & 0x80 != 0) {
+    //     ret &= (1 << (sh - 1)) - 1;
+    //     ret = -ret;
+    // }
+    //
+    // return ret;
+    // Convert the byte slice to an i64
+
+    // Ensure the slice is big enough to hold the i64
+    if (v.len > @sizeOf(i64)) {
+        @panic("it should not happen");
     }
 
-    if (v[len - 1] & 0x80 != 0) {
-        ret &= (1 << (sh - 1)) - 1;
-        ret = -ret;
+    var result: i64 = 0;
+    for (v) |byte| {
+        const hi = result << 8;
+        const low = @as(i64, byte);
+        result = hi + low;
     }
 
-    return ret;
+    return result;
 }

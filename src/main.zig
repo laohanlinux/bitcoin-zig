@@ -58,8 +58,12 @@ pub fn main() !void {
         {
             const v = .{ 0x1, 0x2, 0x3 };
             const n = script_lib.read_scriptint_non_minimal(&v) catch unreachable;
-            std.debug.print("{d}", .{n});
+            std.debug.print("{d}\n", .{n});
         }
+    }
+    {
+        const num = try script_lib.read_scriptint_non_minimal(&[_]u8{ 0, 0, 0, 0 });
+        std.debug.print("number=> {}\n", .{num});
     }
     try bw.flush(); // don't forget to flush!
 }
