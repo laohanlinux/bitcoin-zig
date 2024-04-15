@@ -62,8 +62,31 @@ pub fn main() !void {
         }
     }
     {
-        const num = try script_lib.read_scriptint_non_minimal(&[_]u8{ 0, 0, 0, 0 });
+        const num = try script_lib.read_scriptint_non_minimal(&[_]u8{ 0xff, 0xff, 0xff, 0x00 });
         std.debug.print("number=> {}\n", .{num});
+    }
+
+    {
+        if (script_lib.readScriptBool(&[_]u8{})) {
+            @panic("it should be false");
+        }
+        if (script_lib.readScriptBool(&[_]u8{0x00})) {
+            @panic("it should be false");
+        }
+        if (!script_lib.readScriptBool(&[_]u8{0x01})) {
+            @panic("it should be true");
+        }
+        if (script_lib.readScriptBool(&[_]u8{0x80})) {
+            @panic("it should be false");
+        }
+        if (!script_lib.readScriptBool(&[_]u8{ 0x80, 0x01 })) {
+            @panic("it should be true");
+        }
+        if (!script_lib.readScriptBool(&[_]u8{ 0x00, 0x81 })) {
+            @panic("it should be true");
+        }
+
+        std.debug.print("pass readScriptBool\n", .{});
     }
     try bw.flush(); // don't forget to flush!
 }

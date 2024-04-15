@@ -1,4 +1,5 @@
 const std = @import("std");
+const script = @import("./script.zig");
 
 const ScriptError = error{
     /// Something did a non-minimal push; for more information see
@@ -41,35 +42,53 @@ pub fn read_scriptint_non_minimal(v: []const u8) !i64 {
 }
 
 fn scriptint_parse(v: []const u8) i64 {
-    // var ret: i64 = 0;
-    // var sh: i32 = 0;
-    // const len = v.len;
-    // for (v) |n| {
-    //     const move_n = @as(i64, n);
-    //     //const left_low = @as(i64, sh);
-    //     ret += (move_n << 1);
-    //     sh += 8;
-    // }
-    //
-    // if (v[len - 1] & 0x80 != 0) {
-    //     ret &= (1 << (sh - 1)) - 1;
-    //     ret = -ret;
-    // }
-    //
-    // return ret;
-    // Convert the byte slice to an i64
-
-    // Ensure the slice is big enough to hold the i64
-    if (v.len > @sizeOf(i64)) {
-        @panic("it should not happen");
-    }
-
-    var result: i64 = 0;
+    var ret: i64 = 0;
+    var sh: u6 = 0;
     for (v) |byte| {
-        const hi = result << 8;
-        const low = @as(i64, byte);
-        result = hi + low;
+        ret += @as(i64, byte) << sh;
+        sh += 8;
+    }
+    const last_byte = v[v.len - 1];
+    if ((last_byte & 0x80) != 0) {
+        ret &= (@as(i64, 1) << (sh - 1)) - 1; // 使用 u6 类型的位移
+        ret = -ret;
+    }
+    return ret;
+}
+
+/// Decodes a boolean.
+///
+/// This is like "`read_scriptint` then map 0 to false and everything
+/// else as true", exepect that the overflow rules don't apply.
+pub fn readScriptBool(v: []const u8) bool {
+    if (v.len == 0) {
+        return false;
     }
 
-    return result;
+    const last = v[v.len - 1];
+    const rest = v[0 .. v.len - 1];
+
+    var allZero = true;
+    for (rest) |item| {
+        if (item != 0) {
+            allZero = false;
+            break;
+        }
+    }
+
+    return !((last & ~@as(u8, 0x80)) == 0 and allZero);
+}
+
+fn opcodeToVerify(opcode: ?script.OpCodeType) ?script.OpCodeType {
+    if (opcode) |code| {
+        switch (code) {
+            .OP_EQUAL => return script.OpCodeType.OP_EQUALVERIFY,
+            .OP_NUMEQUAL => return script.OpCodeType.OP_NUMEQUALVERIFY,
+            .OP_CHECKSIG => return script.OpCodeType.OP_CHECKSIGVERIFY,
+            .OP_CHECKMULTISIG => return script.OpCodeType.OP_CHECKMULTISIGVERIFY,
+            else => return null,
+        }
+    }
+
+    return null;
 }
