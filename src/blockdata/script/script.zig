@@ -291,16 +291,51 @@ fn writeScriptInt(out: []u8, n: i64) u32 {
 pub const Script = struct {
     const Self = @This();
     vec: std.ArrayList(u8),
+    allocator: std.mem.Allocator,
 
-    pub fn init() Self {
-        const vec = std.ArrayList(u8).init(std.heap.page_allocator);
-        return .{ .vec = vec };
+    pub fn init(allocator: std.mem.Allocator) Self {
+        const vec = std.ArrayList(u8).init(allocator);
+        return .{ .vec = vec, .allocator = allocator };
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn default(allocator: std.mem.Allocator) Self {
+        return .{ .vec = std.ArrayList(u8).init(allocator), .allocator = allocator };
+    }
+
+    pub fn deinit(self: Self) void {
         self.vec.deinit();
     }
 
+    /// The length in bytes of the script
+    pub fn len(self: *const Self) usize {
+        return self.vec.items.len;
+    }
+
+    /// Whether the script is the empty script
+    pub fn is_empty(self: *const Self) bool {
+        return self.vec.items.len == 0;
+    }
+    /// Returns the script data
+    pub fn as_bytes(self: *const Self) []const u8 {
+        return self.vec.items;
+    }
+
+    /// Returns a copy of the script data
+    pub fn to_bytes(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
+        const bytes = try allocator.alloc(u8, self.vec.items.len);
+        @memcpy(bytes, self.vec.items);
+        return bytes;
+    }
+
+    /// Convert the script into a byte vector
+    pub fn into_bytes(self: Self) struct {
+        bytes: []u8,
+        allocator: std.mem.Allocator,
+    } {
+        return .{ .bytes = self.vec.items, .allocator = self.vec.allocator };
+    }
+
+    /// Convert the script into a string representation of the value
     pub fn value_string(self: *Self, vch: []const u8) []const u8 {
         if (vch.len <= 4) {
             const num = std.big.Int.fromSlice(std.big.IntSignedness.Signed, vch, std.big.LittleEndian, .{});
