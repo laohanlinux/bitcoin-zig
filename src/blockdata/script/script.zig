@@ -420,10 +420,6 @@ pub const ScriptBuilder = struct {
         return self.len() == 0;
     }
 
-    // pub fn push_slice(self: *Self, data: []u8) void {
-    //     // self.script.pu
-    // }
-
     pub fn push_opcode(self: *Self, opCode: OpCodeType) void {
         self.script.put_code(opCode);
         self.opCode.? = opCode;
