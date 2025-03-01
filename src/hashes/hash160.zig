@@ -71,7 +71,7 @@ pub fn hash160(input: []const u8) ![]u8 {
 
     // Final hash value
     var hash: [20]u8 = undefined;
-    for (md) |_, i| {
+    for (md) |i| {
         hash[i * 4] = @intCast(u8, _ & 0xff);
         hash[i * 4 + 1] = @intCast(u8, (_ >> 8) & 0xff);
         hash[i * 4 + 2] = @intCast(u8, (_ >> 16) & 0xff);
@@ -85,7 +85,7 @@ fn processBlock(md: [5]u32, block: []const u8) [5]u32 {
     // Convert block to u32
     var X: [16]u32 = undefined;
     for (block) |b, i| {
-        X[i] = b;
+        X[i] = @intCast(u32, b);
     }
 
     var a = md[0];
