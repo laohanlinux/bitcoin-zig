@@ -34,7 +34,7 @@ fn sha256d() type {
 }
 
 /// Convert a slice of bytes to a hex string.
-pub inline fn hex(allocator: std.mem.Allocator, data: []const u8) ![]const u8 {
+pub inline fn hex(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
     const hex_str = try std.fmt.allocPrint(allocator, "{x}", .{std.fmt.fmtSliceHexLower(data[0..])});
     return hex_str;
 }
