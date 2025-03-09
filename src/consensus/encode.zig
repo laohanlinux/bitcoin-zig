@@ -136,6 +136,15 @@ pub fn Encodable(comptime T: type) type {
                     try writer.writeInt(i64, self.value, .little);
                     return 8;
                 },
+                []const u8 => {
+                    const varInt = VarInt.init(@as(u64, @intCast(self.value.len)));
+                    var len = try Encodable(VarInt).init(varInt).consensus_encode(writer);
+                    for (self.value.items) |c| {
+                        try writer.writeByte(c);
+                        len += 1;
+                    }
+                    return len;
+                },
                 VarInt => {
                     switch (self.value.value) {
                         0...0xFC => {
@@ -158,18 +167,18 @@ pub fn Encodable(comptime T: type) type {
                 },
                 CheckedData => {
                     const dataLen = @as(u32, @intCast(T.data.len));
-                    // 写入数据长度
                     try writer.writeInt(u32, dataLen, .little);
-                    // 写入校验和
                     const checkSum = sha2CheckSum(T.data);
                     try writer.writeAll(checkSum);
-                    // 写入数据
                     try writer.writeAll(T.data);
                     return T.data.len + 8;
                 },
-
                 else => @compileError("Unsupported type: " ++ @typeName(T)),
             };
+        }
+
+        pub fn consensus_encode_with_allocator(self: @This()) !usize {
+            _ = self; // autofix
         }
     };
 }
@@ -244,7 +253,6 @@ pub fn Decodable(comptime T: type) type {
                 CheckedData => {
                     @compileError("CheckedData is not supported, use consensus_decode_with_allocator instead");
                 },
-
                 else => @compileError("Unsupported type: " ++ @typeName(T)),
             };
         }
@@ -355,7 +363,6 @@ pub const VarInt = struct {
     }
 };
 
-/// 必须前置4字节校验和的数据
 pub const CheckedData = struct {
     data: []const u8,
     allocator: std.mem.Allocator,
