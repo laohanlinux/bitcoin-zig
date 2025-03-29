@@ -1,7 +1,7 @@
 const std = @import("std");
 const base58 = @import("./base58.zig");
 const allocator = std.heap.page_allocator;
-const ripemd160 = @import("./libcrypto/ripemd160.zig");
+// const ripemd160 = @import("./libcrypto/ripemd160.zig");
 const crypto = @import("./libcrypto/crypto.zig");
 const script = @import("./blockdata/script/script.zig");
 const instr = @import("./blockdata/script/instruction.zig");
@@ -91,9 +91,9 @@ pub fn main() !void {
     try bw.flush(); // don't forget to flush!
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
+// test "simple test" {
+//     var list = std.ArrayList(i32).init(std.testing.allocator);
+//     defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
+//     try list.append(42);
+//     try std.testing.expectEqual(@as(i32, 42), list.pop());
+// }

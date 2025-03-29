@@ -15,6 +15,24 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const libMod = struct {
+        name: []const u8,
+        m: *std.Build.Module,
+    };
+
+    const libMods = [_]libMod{
+        .{ .name = "hashtypes", .m = std.Build.Module.create(b, .{
+            .root_source_file = b.path("src/hash_types.zig"),
+            .target = target,
+            .optimize = optimize,
+        }) },
+        .{ .name = "hash", .m = std.Build.Module.create(b, .{
+            .root_source_file = b.path("src/hashes/hash_engine.zig"),
+            .target = target,
+            .optimize = optimize,
+        }) },
+    };
+
     // This creates a "module", which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
     // Every executable or library we compile will be based on one or more modules.
@@ -27,6 +45,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    // 添加 hash 模块作为 lib_mod 的依赖
+    for (libMods) |mod| {
+        lib_mod.addImport(mod.name, mod.m);
+    }
 
     // We will also create a module for our other entry point, 'main.zig'.
     const exe_mod = b.createModule(.{
@@ -99,11 +122,19 @@ pub fn build(b: *std.Build) void {
         .root_module = lib_mod,
     });
 
+    for (libMods) |mod| {
+        lib_unit_tests.root_module.addImport(mod.name, mod.m);
+    }
+
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
     const exe_unit_tests = b.addTest(.{
         .root_module = exe_mod,
     });
+
+    for (libMods) |mod| {
+        exe_unit_tests.root_module.addImport(mod.name, mod.m);
+    }
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
@@ -113,4 +144,22 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    // Add test case
+    const testPath = [_][]const u8{
+        "src/consensus/encode.zig",
+    };
+    for (testPath) |path| {
+        const encode_tests = b.addTest(.{
+            .root_source_file = b.path(path),
+            .target = target,
+            .optimize = optimize,
+        });
+        // 如果 encode.zig 需要 hash 模块，也添加进来
+        // encode_tests.root_module.addImport("hash", hash_mod);
+
+        const run_encode_tests = b.addRunArtifact(encode_tests);
+        // 将 encode 测试添加到测试步骤中
+        test_step.dependOn(&run_encode_tests.step);
+    }
 }

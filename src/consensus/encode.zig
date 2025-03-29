@@ -18,33 +18,35 @@ const mem = std.mem;
 const math = std.math;
 const testing = std.testing;
 
-const hash = @import("../hashes/hash_engine.zig");
+const hash = @import("hash");
 const Sha256D = hash.HashEngine(.sha256d);
 const hex = hash.hex;
+const hashType = @import("hashtypes");
+const TxId = hashType.Txid;
 
-/// 编码错误
+/// encoding error
 pub const Error = error{
-    /// I/O 错误
+    /// I/O error
     IoError,
-    /// PSBT 相关错误
+    /// PSBT related error
     PsbtError,
-    /// 网络魔术值不符合预期
+    /// unexpected network magic
     UnexpectedNetworkMagic,
-    /// 尝试分配过大的向量
+    /// attempt to allocate too large a vector
     OversizedVectorAllocation,
-    /// 校验和无效
+    /// invalid checksum
     InvalidChecksum,
-    /// VarInt 编码不是最小的
+    /// VarInt is not minimally encoded
     NonMinimalVarInt,
-    /// 未知的网络魔术值
+    /// unknown network magic
     UnknownNetworkMagic,
-    /// 解析失败
+    /// data not consumed entirely when explicitly deserializing"
     ParseFailed,
-    /// 不支持的隔离见证标志
+    /// unsupported segwit flag
     UnsupportedSegwitFlag,
-    /// 无法识别的网络命令
+    /// unrecognized network command
     UnrecognizedNetworkCommand,
-    /// 无效的库存类型
+    /// unknown inventory type
     UnknownInventoryType,
 };
 
@@ -54,7 +56,7 @@ pub inline fn serialize(allocator: std.mem.Allocator, data: anytype) ![]u8 {
     errdefer list.deinit();
     const writer = list.writer();
     var encode = Encodable(@TypeOf(data)).init(data);
-    _ = try encode.consensus_encode(writer);
+    _ = try encode.consensusEncode(writer);
     return list.toOwnedSlice();
 }
 
@@ -65,23 +67,53 @@ pub inline fn serializeHex(allocator: std.mem.Allocator, data: anytype) ![]u8 {
     return hex(allocator, bytes);
 }
 
+pub fn decodeVec(allocator: std.mem.Allocator, comptime T: type, data: []const u8) !T {
+    var reader = std.io.fixedBufferStream(data);
+    const varint = try VarInt.init(0).consensusDecode(reader.reader());
+    const len = varint.value;
+    const byteSize = len * @sizeOf(T);
+    if (byteSize > MAX_VEC_SIZE) {
+        return Error.OversizedVectorAllocation;
+    }
+    var result = try allocator.alloc(T, len);
+    errdefer allocator.free(result);
+    var i: usize = 0;
+    while (i < len) : (i += 1) {
+        result[i] = try decode(T, allocator, reader);
+    }
+    var t = std.ArrayList(T).init(allocator);
+    errdefer t.deinit();
+    return t.toOwnedSlice();
+}
+
+pub fn deserializeWithAllocator(allocator: std.mem.Allocator, comptime T: type, data: []const u8) !T {
+    var decoder = Decodable(T).init(.{ .allocator = allocator });
+    var reader = std.io.fixedBufferStream(data);
+    const result = try decoder.consensusDecode(reader.reader());
+    return result.value;
+}
+
 /// Deserialize an object from a byte slice
 pub fn deserialize(comptime T: type, data: []const u8) !T {
-    var stream = io.fixedBufferStream(data);
-    const reader = stream.reader();
-    const result = try Decodable(T).consensus_decode(reader);
+    var decoder = Decodable(T).init(.{});
+    const result = try decoder.consensusDecode(data);
     // Ensure all data was consumed
-    if (stream.pos != data.len) {
+    if (result.bytes_read != data.len) {
+        // data not consumed entirely when explicitly deserializing
         return Error.ParseFailed;
     }
     return result.value;
 }
 
+fn deserializeWithReader(comptime T: type, reader: std.io.FixedBufferStream([]const u8).Reader) !T {
+    var decoder = Decodable(T).init(.{});
+}
+
 /// Deserialize an object from a byte slice, but don't require consuming the entire slice
 pub fn deserializePartial(comptime T: type, data: []const u8) !struct { value: T, consumed: usize } {
-    var stream = io.fixedBufferStream(data);
-    const reader = stream.reader();
-    const result = try Decodable(T).consensus_decode(reader);
+    var decoder = Decodable(T).init(.{});
+    var reader = std.io.fixedBufferStream(data);
+    const result = try decoder.consensusDecode(reader.reader());
     return .{ .value = result.value, .consumed = result.bytes_read };
 }
 
@@ -97,7 +129,7 @@ pub fn Encodable(comptime T: type) type {
             return .{ .value = value };
         }
 
-        pub fn consensus_encode(self: @This(), writer: anytype) !usize {
+        pub fn consensusEncode(self: @This(), writer: anytype) !usize {
             return switch (T) {
                 bool => {
                     const n: u8 = if (self.value) 1 else 0;
@@ -142,111 +174,195 @@ pub fn Encodable(comptime T: type) type {
                 },
                 []const u8 => {
                     const varInt = VarInt.init(@as(u64, @intCast(self.value.len)));
-                    var len = try Encodable(VarInt).init(varInt).consensus_encode(writer);
-                    for (self.value.items) |c| {
-                        try writer.writeByte(c);
-                        len += 1;
-                    }
-                    return len;
+                    const len = try Encodable(VarInt).init(varInt).consensusEncode(writer);
+                    const dataLen = try writer.writeAll(self.value);
+                    std.debug.assert(dataLen == self.value.len);
+                    return len + dataLen;
                 },
                 VarInt => {
-                    return self.value.consensus_encode(writer);
+                    return self.value.consensusEncode(writer);
                 },
                 CheckedData => {
-                    const dataLen = @as(u32, @intCast(T.data.len));
+                    var dataLen = @as(u32, @intCast(self.value.data.len));
                     try writer.writeInt(u32, dataLen, .little);
-                    const checkSum = sha2CheckSum(T.data);
-                    try writer.writeAll(checkSum);
-                    try writer.writeAll(T.data);
-                    return T.data.len + 8;
+                    const checkSum = sha2CheckSum(self.value.data);
+                    dataLen = try writer.writeAll(&checkSum);
+                    std.debug.assert(dataLen == 4);
+                    dataLen = try writer.writeAll(self.value.data);
+                    std.debug.assert(dataLen == self.value.data.len);
+                    return self.value.data.len + 8;
                 },
                 else => @compileError("Unsupported type: " ++ @typeName(T)),
             };
-        }
-
-        pub fn consensus_encode_with_allocator(self: @This()) !usize {
-            _ = self; // autofix
         }
     };
 }
 
 pub fn Decodable(comptime T: type) type {
     return struct {
-        pub fn consensus_decode(reader: anytype) !struct { value: T, bytes_read: usize } {
-            return switch (T) {
-                bool => {
-                    const n = try reader.readByte();
-                    return .{ .value = n != 0, .bytes_read = 1 };
-                },
-                u8 => {
-                    const n = try reader.readByte();
-                    return .{ .value = n, .bytes_read = 1 };
-                },
-                i8 => {
-                    const n = try reader.readByte();
-                    return .{ .value = @intCast(n), .bytes_read = 1 };
-                },
-                u16 => {
-                    const n = try reader.readInt(u16, .little);
-                    return .{ .value = n, .bytes_read = 2 };
-                },
-                i16 => {
-                    const n = try reader.readInt(i16, .little);
-                    return .{ .value = n, .bytes_read = 2 };
-                },
-                u32 => {
-                    const n = try reader.readInt(u32, .little);
-                    return .{ .value = n, .bytes_read = 4 };
-                },
-                i32 => {
-                    const n = try reader.readInt(i32, .little);
-                    return .{ .value = n, .bytes_read = 4 };
-                },
-                u64 => {
-                    const n = try reader.readInt(u64, .little);
-                    return .{ .value = n, .bytes_read = 8 };
-                },
-                i64 => {
-                    const n = try reader.readInt(i64, .little);
-                    return .{ .value = n, .bytes_read = 8 };
-                },
-                VarInt => {
-                    const result = try VarInt.consensus_decode(reader);
-                    return .{ .value = result.value, .bytes_read = result.bytes_read };
-                },
-                CheckedData => {
-                    @compileError("CheckedData is not supported, use consensus_decode_with_allocator instead");
-                },
-                else => @compileError("Unsupported type: " ++ @typeName(T)),
-            };
-        }
+        const Option = struct {
+            allocator: ?std.mem.Allocator = null,
+        };
+        pub const Reader = std.io.FixedBufferStream([]const u8).Reader;
 
-        /// 使用指定的allocator解码T
-        pub fn consensus_decode_with_allocator(allocator: std.mem.Allocator, reader: anytype) !struct { value: T, bytes_read: usize } {
-            switch (T) {
-                [2]u8, [4]u8, [8]u8, [12]u8, [16]u8, [32]u8, [33]u8 => {
-                    const buffer = try allocator.alloc(u8, T.len);
-                    const n = try reader.readAll(buffer);
-                    return .{ .value = buffer, .bytes_read = n };
-                },
-                CheckedData => {
-                    var dataLen: u32 = try reader.readInt(u32, .little);
-                    if (dataLen > MAX_VEC_SIZE) {
-                        std.log.err("CheckedData: dataLen > {d}", .{MAX_VEC_SIZE});
-                        return Error.OversizedVectorAllocation;
-                    }
-                    const checkSum: [4]u8 = undefined;
-                    const checkSumLen = try reader.read(checkSum);
-                    if (checkSumLen != 4) {
-                        return Error.InvalidChecksum;
-                    }
-                    const data = try allocator.?.alloc(u8, dataLen);
-                    dataLen = try reader.read(data);
-                    std.testing.expect(dataLen == data.len);
-                    return .{ .value = CheckedData{ .data = data, .allocator = allocator.? }, .bytes_read = dataLen + 8 };
-                },
-                else => return Decodable(T).consensus_decode(reader),
+        const Decoder = struct {
+            value: T = undefined,
+            bytes_read: usize = 0,
+            allocator: ?std.mem.Allocator = null,
+            pub fn consensusDecode(self: *Decoder, reader: Reader) !*Decoder {
+                switch (T) {
+                    bool => {
+                        const n = try reader.readByte();
+                        self.value = n != 0;
+                        self.bytes_read = 1;
+                        return self;
+                    },
+                    u8 => {
+                        const n = try reader.readByte();
+                        self.value = n;
+                        self.bytes_read = 1;
+                        return self;
+                    },
+                    i8 => {
+                        const n = try reader.readByte();
+                        self.value = n;
+                        self.bytes_read = 1;
+                        return self;
+                    },
+                    u16 => {
+                        const n = reader.readInt(u16, .little) catch {
+                            return error.ParseFailed;
+                        };
+                        self.value = n;
+                        self.bytes_read = 2;
+                        return self;
+                    },
+                    i16 => {
+                        const n = try reader.readInt(i16, .little);
+                        self.value = n;
+                        self.bytes_read = 2;
+                        return self;
+                    },
+                    u32 => {
+                        const n = reader.readInt(u32, .little) catch {
+                            return error.ParseFailed;
+                        };
+                        self.value = n;
+                        self.bytes_read = 4;
+                        return self;
+                    },
+                    i32 => {
+                        const n = reader.readInt(i32, .little) catch {
+                            return error.ParseFailed;
+                        };
+                        self.value = n;
+                        self.bytes_read = 4;
+                        return self;
+                    },
+                    u64 => {
+                        const n = reader.readInt(u64, .little) catch {
+                            return error.ParseFailed;
+                        };
+                        self.value = n;
+                        self.bytes_read = 8;
+                        return self;
+                    },
+                    i64 => {
+                        const n = reader.readInt(i64, .little) catch {
+                            return error.ParseFailed;
+                        };
+                        self.value = n;
+                        self.bytes_read = 8;
+                        return self;
+                    },
+                    VarInt => {
+                        const result = try VarInt.consensusDecode(reader);
+                        self.value = result.value;
+                        self.bytes_read = result.bytes_read;
+                        return self;
+                    },
+                    [2]u8, [4]u8, [8]u8, [12]u8, [16]u8, [32]u8, [33]u8 => {
+                        // |len(VarInt) | data(slice) |
+                        const varInt = try VarInt.consensusDecode(reader);
+                        if (varInt.value.value > MAX_VEC_SIZE) {
+                            return Error.OversizedVectorAllocation;
+                        }
+                        // the length of the data must be >= 1
+                        std.debug.assert(varInt.value.value >= 1);
+
+                        // if ((data.len - 1) != varInt.value.value) {
+                        //     return Error.ParseFailed;
+                        // }
+                        const n = reader.readAll(self.value) catch {
+                            return Error.ParseFailed;
+                        };
+                        if (n != self.value.len) {
+                            return Error.ParseFailed;
+                        }
+                        self.bytes_read = n;
+                        return self;
+                    },
+                    []u8, []const u8 => {
+                        // |len(VarInt) | data(slice) |
+                        const varInt = try VarInt.consensusDecode(reader);
+                        if (varInt.value.value > MAX_VEC_SIZE) {
+                            return Error.OversizedVectorAllocation;
+                        }
+                        // the length of the data must be >= 1
+                        std.debug.assert(varInt.value.value >= 1);
+
+                        // if ((data.len - 1) != varInt.value.value) {
+                        //     return Error.ParseFailed;
+                        // }
+                        const data_ = self.allocator.?.alloc(u8, varInt.value.value) catch {
+                            return Error.ParseFailed;
+                        };
+                        errdefer self.allocator.?.free(data_);
+                        const n = reader.readAll(data_) catch {
+                            return Error.ParseFailed;
+                        };
+                        self.value = data_;
+                        self.bytes_read = n;
+                        return self;
+                    },
+                    CheckedData => {
+                        // |len(u32) | checksum(4) | data(slice) |
+                        var dataLen: u32 = try reader.readInt(u32, .little);
+                        if (dataLen > MAX_VEC_SIZE) {
+                            return Error.OversizedVectorAllocation;
+                        }
+                        const checkSum: [4]u8 = undefined;
+                        const checkSumLen = try reader.read(checkSum);
+                        if (checkSumLen != 4) {
+                            return Error.InvalidChecksum;
+                        }
+                        const data_ = try self.allocator.alloc(u8, dataLen);
+                        dataLen = try reader.read(data_);
+                        self.value = CheckedData{ .data = data_, .allocator = self.allocator };
+                        self.bytes_read = dataLen + 8;
+                        return self;
+                    },
+                    else => @compileError("Unsupported type: " ++ @typeName(T)),
+                }
             }
+
+            pub fn deinit(self: Decoder) void {
+                switch (T) {
+                    [2]u8, [4]u8, [8]u8, [12]u8, [16]u8, [32]u8, [33]u8, []u8, []const u8 => {
+                        std.debug.assert(self.allocator != null);
+                        self.allocator.?.free(self.value);
+                    },
+                    CheckedData => {
+                        self.value.allocator.free(self.value.data);
+                    },
+                    else => {},
+                }
+            }
+        };
+
+        // init Decoder with value and option
+        pub fn init(option: Option) Decoder {
+            return .{ .bytes_read = 0, .allocator = option.allocator };
         }
     };
 }
@@ -332,29 +448,41 @@ pub const VarInt = struct {
     }
 
     /// 编码VarInt, consensus_encode(writer)
-    pub fn consensus_encode(self: VarInt, writer: anytype) !usize {
+    pub fn consensusEncode(self: VarInt, writer: anytype) !usize {
         switch (self.value) {
             0...0xFC => {
                 const n = @as(u8, @intCast(self.value));
-                return Encodable(u8).init(n).consensus_encode(writer);
+                // 1 byte
+                const dataLen = try Encodable(u8).init(n).consensusEncode(writer);
+                std.debug.assert(dataLen == 1);
+                return dataLen;
             },
             0xFD...0xFFFF => {
                 try writer.writeByte(0xFD);
-                return Encodable(u16).init(@intCast(self.value)).consensus_encode(writer);
+                const dataLen = try Encodable(u16).init(@intCast(self.value)).consensusEncode(writer);
+                std.debug.assert(dataLen == 2);
+                // 1 byte + 2 bytes
+                return dataLen + 1;
             },
             0x10000...0xFFFFFFFF => {
                 try writer.writeByte(0xFE);
-                return try Encodable(u32).init(@intCast(self.value)).consensus_encode(writer);
+                const dataLen = try Encodable(u32).init(@intCast(self.value)).consensusEncode(writer);
+                std.debug.assert(dataLen == 4);
+                // 1 byte + 4 bytes
+                return dataLen + 1;
             },
             else => {
                 try writer.writeByte(0xFF);
-                return Encodable(u64).init(self.value).consensus_encode(writer);
+                const dataLen = try Encodable(u64).init(self.value).consensusEncode(writer);
+                std.debug.assert(dataLen == 8);
+                // 1 byte + 8 bytes
+                return dataLen + 1;
             },
         }
     }
 
     /// 解码VarInt, consensus_decode(reader)
-    pub fn consensus_decode(reader: anytype) !struct { value: VarInt, bytes_read: usize } {
+    pub fn consensusDecode(reader: anytype) !struct { value: VarInt, bytes_read: usize } {
         const n = try reader.readByte();
         switch (n) {
             0xFF => {
@@ -430,29 +558,49 @@ pub fn consensusEncodeWithSize(data: []const u8, writer: anytype) !usize {
 fn testVarIntEncode(n: u8, x: []const u8) !VarInt {
     var input = [_]u8{0} ** 9;
     input[0] = n;
-    @memcpy(input[1..], x);
+    @memcpy(input[1..(1 + x.len)], x);
     const value = try deserializePartial(VarInt, &input);
     return value.value;
 }
 
-//   fn test_varint_len(varint: VarInt, expected: usize) {
-//         let mut encoder = io::Cursor::new(vec![]);
-//         assert_eq!(varint.consensus_encode(&mut encoder).unwrap(), expected);
-//         assert_eq!(varint.len(), expected);
-//     }
-
-fn testVarIntLen(varint: VarInt, expected: usize) void {
-    const buffer = std.testing.allocator.alloc(u8, expected) catch unreachable;
-    defer std.testing.allocator.free(buffer);
-    const encoder = io.fixedBufferStream(buffer).writer();
-    const len = varint.consensus_encode(encoder) catch unreachable;
-    std.testing.expect(len == expected);
+fn testVarIntLen(varint: VarInt, expected: usize) !void {
+    var buffer = std.ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+    const writer = buffer.writer();
+    const len = try varint.consensusEncode(writer);
+    try std.testing.expectEqual(expected, len);
 }
 
-fn u64ToArrayLe(n: u64) [8]u8 {
-    var buffer = [8]u8{ 0, 0, 0, 0, 0, 0, 0, 0 };
+fn toArrayLe(value: anytype, comptime size: usize) [size]u8 {
+    var buffer = [_]u8{0} ** size;
     var fbs = std.io.fixedBufferStream(&buffer);
-    fbs.writer().writeInt(u64, n, .little) catch unreachable;
+    const writer = fbs.writer();
+    switch (@TypeOf(value)) {
+        u8, i8 => writer.writeInt(u8, @intCast(value), .little) catch unreachable,
+        u16, i16 => writer.writeInt(u16, @intCast(value), .little) catch unreachable,
+        u32, i32 => writer.writeInt(u32, @intCast(value), .little) catch unreachable,
+        u64, i64 => writer.writeInt(u64, @intCast(value), .little) catch unreachable,
+        comptime_int => {
+            if (value >= 0 and value <= std.math.maxInt(u8)) {
+                writer.writeInt(u8, @intCast(value), .little) catch unreachable;
+            } else if (value >= std.math.minInt(i8) and value < 0) {
+                writer.writeInt(i8, @intCast(value), .little) catch unreachable;
+            } else if (value >= 0 and value <= std.math.maxInt(u16)) {
+                writer.writeInt(u16, @intCast(value), .little) catch unreachable;
+            } else if (value >= std.math.minInt(i16) and value < 0) {
+                writer.writeInt(i16, @intCast(value), .little) catch unreachable;
+            } else if (value >= 0 and value <= std.math.maxInt(u32)) {
+                writer.writeInt(u32, @intCast(value), .little) catch unreachable;
+            } else if (value >= std.math.minInt(i32) and value < 0) {
+                writer.writeInt(i32, @intCast(value), .little) catch unreachable;
+            } else if (value >= 0) {
+                writer.writeInt(u64, @intCast(value), .little) catch unreachable;
+            } else {
+                writer.writeInt(i64, @intCast(value), .little) catch unreachable;
+            }
+        },
+        else => @compileError("Unsupported type for toArrayLe: " ++ @typeName(@TypeOf(value))),
+    }
     return buffer;
 }
 
@@ -603,9 +751,9 @@ test "serialize_varint_test" {
         const preArgs = [_]u8{ 0xFF, 0xFE, 0xFD };
         const args = [_]VarInt{ VarInt.init(0x100000000), VarInt.init(0x10000), VarInt.init(0xFD) };
         const encoded = [_][8]u8{
-            u64ToArrayLe(0x100000000),
-            u64ToArrayLe(0x10000),
-            u64ToArrayLe(0xFD),
+            toArrayLe(0x100000000, 8),
+            toArrayLe(0x10000, 8),
+            toArrayLe(0xFD, 8),
         };
         for (0..args.len) |i| {
             const got = try testVarIntEncode(preArgs[i], &encoded[i]);
@@ -613,63 +761,210 @@ test "serialize_varint_test" {
         }
     }
 
+    // Test that length calc is working correctly
     {
-        // Test that length calc is working correctly
-        // test_varint_len(VarInt(0), 1);
-        // test_varint_len(VarInt(0xFC), 1);
-        // test_varint_len(VarInt(0xFD), 3);
-        // test_varint_len(VarInt(0xFFFF), 3);
-        // test_varint_len(VarInt(0x10000), 5);
-        // test_varint_len(VarInt(0xFFFFFFFF), 5);
-        // test_varint_len(VarInt(0xFFFFFFFF+1), 9);
-        // test_varint_len(VarInt(u64::max_value()), 9);
-
+        try testVarIntLen(VarInt.init(0), 1);
+        try testVarIntLen(VarInt.init(0xFC), 1);
+        try testVarIntLen(VarInt.init(0xFD), 3);
+        try testVarIntLen(VarInt.init(0xFFFF), 3);
+        try testVarIntLen(VarInt.init(0x10000), 5);
+        try testVarIntLen(VarInt.init(0xFFFFFFFF), 5);
+        try testVarIntLen(VarInt.init(0xFFFFFFFF + 1), 9);
+        try testVarIntLen(VarInt.init(std.math.maxInt(u64)), 9);
     }
 }
 
-test "encodable" {
-    var _i8 = Encodable(i8).init(1);
-    var buffer = std.ArrayList(u8).init(std.testing.allocator);
-    defer buffer.deinit();
-    const nsize = try _i8.consensus_encode(buffer.writer());
-    try std.testing.expectEqual(nsize, 1);
+test "deserialize_nonminimal_vec" {
+    // Check the edges for variant int
+    _ = testVarIntEncode(0xFF, &toArrayLe(0x100000000 - 1, 8)) catch |err| {
+        try testing.expect(err == error.NonMinimalVarInt);
+    };
+    _ = testVarIntEncode(0xFE, &toArrayLe(0x10000 - 1, 4)) catch |err| {
+        try testing.expect(err == error.NonMinimalVarInt);
+    };
+    _ = testVarIntEncode(0xFD, &toArrayLe(0xFD - 1, 2)) catch |err| {
+        try testing.expect(err == error.NonMinimalVarInt);
+    };
+    std.testing.log_level = .debug;
+
+    {
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfd, 0x00, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
+
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfd, 0xfc, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
+
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfe, 0xff, 0x00, 0x00, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfe, 0xff, 0xff, 0x00, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
+    }
+
+    var vec256 = [_]u8{0x00} ** 259;
+    vec256[0] = 0xfd;
+    vec256[1] = 0x00;
+    vec256[2] = 0x01;
+    const result = deserializeWithAllocator(testing.allocator, []u8, &vec256) catch unreachable;
+    defer testing.allocator.free(result);
+    var vec253 = [_]u8{0x00} ** 256;
+    vec253[0] = 0xfd;
+    vec253[1] = 0xfd;
+    vec253[2] = 0x00;
+    const result2 = deserializeWithAllocator(testing.allocator, []u8, &vec253) catch unreachable;
+    defer testing.allocator.free(result2);
 }
 
-test "serialize and deserialize" {
-    const allocator = testing.allocator;
+// test "serialize_strbuf_test" {
+//     const str: []const u8 = "Andrew";
+//     const encoded = try serialize(testing.allocator, str);
+//     defer testing.allocator.free(encoded);
+//     try testing.expect(std.mem.eql(u8, encoded, &[_]u8{ 6, 0x41, 0x6e, 0x64, 0x72, 0x65, 0x77 }));
+// }
 
-    // Test integers
-    {
-        const original: u32 = 12345678;
-        const encoded = try serialize(allocator, original);
-        defer allocator.free(encoded);
+// test "deserialize_int_test" {
+//     // bool
+//     {
+//         _ = deserialize(bool, &[_]u8{ 58, 0 }) catch |err| {
+//             try testing.expect(err == error.ParseFailed);
+//         };
+//         _ = deserialize(bool, &[_]u8{58}) catch unreachable;
+//         _ = deserialize(bool, &[_]u8{1}) catch unreachable;
+//         _ = deserialize(bool, &[_]u8{0}) catch unreachable;
+//         _ = deserialize(bool, &[_]u8{ 0, 1 }) catch |err| {
+//             try testing.expect(err == error.ParseFailed);
+//         };
+//     }
 
-        const decoded = try deserialize(u32, encoded);
-        try testing.expectEqual(original, decoded);
-    }
+//     // u8
+//     {
+//         _ = deserialize(u8, &[_]u8{58}) catch unreachable;
+//     }
 
-    // Test VarInt
-    {
-        const original = VarInt{ .value = 0xFFF };
-        const encoded = try serialize(allocator, original);
-        defer allocator.free(encoded);
+//     // u16
+//     {
+//         const got = try deserialize(u16, &[_]u8{ 0x01, 0x02 });
+//         try testing.expectEqual(got, 0x0201);
+//         const got2 = try deserialize(u16, &[_]u8{ 0xAB, 0xCD });
+//         try testing.expectEqual(got2, 0xCDAB);
+//         const got3 = try deserialize(u16, &[_]u8{ 0xA0, 0x0D });
+//         try testing.expectEqual(got3, 0xDA0);
+//         _ = deserialize(u16, &[_]u8{1}) catch |err| {
+//             try testing.expect(err == error.ParseFailed);
+//         };
+//     }
+//     // u32
+//     {
+//         const got = try deserialize(u32, &[_]u8{ 0xAB, 0xCD, 0, 0 });
+//         try testing.expectEqual(got, 0xCDAB);
+//         const got2 = try deserialize(u32, &[_]u8{ 0xA0, 0x0D, 0xAB, 0xCD });
+//         try testing.expectEqual(got2, 0xCDAB0DA0);
+//         _ = deserialize(u32, &[_]u8{ 1, 2, 3 }) catch |err| {
+//             try testing.expect(err == error.ParseFailed);
+//         };
 
-        const decoded = try deserialize(VarInt, encoded);
-        try testing.expectEqual(original.value, decoded.value);
-    }
+//         const got3 = try deserialize(i32, &[_]u8{ 0xAB, 0xCD, 0, 0 });
+//         try testing.expectEqual(got3, 0xCDAB);
+//         const got4 = try deserialize(i32, &[_]u8{ 0xA0, 0x0D, 0xAB, 0x2D });
+//         try testing.expectEqual(got4, 0x2DAB0DA0);
+//         _ = deserialize(i32, &[_]u8{ 1, 2, 3 }) catch |err| {
+//             try testing.expect(err == error.ParseFailed);
+//         };
+//     }
 
-    // Test partial deserialization
-    {
-        const original: u16 = 12345;
-        const buffer = try allocator.alloc(u8, 4);
-        defer allocator.free(buffer);
+//     // u64
+//     {
+//         const got = try deserialize(u64, &[_]u8{ 0xAB, 0xCD, 0, 0, 0, 0, 0, 0 });
+//         try testing.expectEqual(got, 0xCDAB);
+//         const got2 = try deserialize(u64, &[_]u8{ 0xA0, 0x0D, 0xAB, 0xCD, 0x99, 0, 0, 0x99 });
+//         try testing.expectEqual(got2, 0x99000099CDAB0DA0);
+//         _ = deserialize(u64, &[_]u8{ 1, 2, 3, 4, 5, 6, 7 }) catch |err| {
+//             try testing.expect(err == error.ParseFailed);
+//         };
 
-        var stream = io.fixedBufferStream(buffer);
-        _ = try Encodable(u16).init(original).consensus_encode(stream.writer());
-        _ = try Encodable(u8).init(42).consensus_encode(stream.writer());
+//         const got3 = try deserialize(i64, &[_]u8{ 0xAB, 0xCD, 0, 0, 0, 0, 0, 0 });
+//         try testing.expectEqual(got3, 0xCDAB);
+//         const got4 = try deserialize(i64, &[_]u8{ 0xA0, 0x0D, 0xAB, 0xCD, 0x99, 0, 0, 0x99 });
+//         try testing.expectEqual(got4, -0x66ffff663254f260);
+//         _ = deserialize(i64, &[_]u8{ 1, 2, 3, 4, 5, 6, 7 }) catch |err| {
+//             try testing.expect(err == error.ParseFailed);
+//         };
+//     }
+// }
 
-        const result = try deserializePartial(u16, buffer);
-        try testing.expectEqual(original, result.value);
-        try testing.expectEqual(@as(usize, 2), result.consumed);
-    }
+test "deserialize_vec_test" {
+    const got = try deserializeWithAllocator(testing.allocator, []const u8, &[_]u8{ 3, 2, 3, 4 });
+    defer testing.allocator.free(got);
+    try testing.expectEqualSlices(u8, got, &[_]u8{ 2, 3, 4 });
+    _ = deserializeWithAllocator(testing.allocator, []const u8, &[_]u8{ 4, 2, 3, 4, 5, 6 }) catch |err| {
+        testing.expect(err == error.ParseFailed) catch unreachable;
+    };
+
+    _ = deserializeWithAllocator(testing.allocator, []const u64, &[_]u8{ 0xff, 0xff, 0xff, 0xff, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0xa, 0xa, 0x3a }) catch |err| {
+        testing.expect(err == error.OversizedVectorAllocation) catch unreachable;
+    };
 }
+
+// test "serialize_checked_data" {
+//     const data = CheckedData{ .data = &[_]u8{ 1, 2, 3, 4, 5 }, .allocator = testing.allocator };
+//     const encoded = try serialize(testing.allocator, data);
+//     defer testing.allocator.free(encoded);
+//     try testing.expect(std.mem.eql(u8, encoded, &[_]u8{ 5, 0, 0, 0, 162, 107, 175, 90, 1, 2, 3, 4, 5 }));
+//     std.testing.log_level = .debug;
+// }
+
+// test "encodable" {
+//     var _i8 = Encodable(i8).init(1);
+//     var buffer = std.ArrayList(u8).init(std.testing.allocator);
+//     defer buffer.deinit();
+//     const nsize = try _i8.consensus_encode(buffer.writer());
+//     try std.testing.expectEqual(nsize, 1);
+// }
+
+// test "serialize and deserialize" {
+//     const allocator = testing.allocator;
+
+//     // Test integers
+//     {
+//         const original: u32 = 12345678;
+//         const encoded = try serialize(allocator, original);
+//         defer allocator.free(encoded);
+
+//         const decoded = try deserialize(u32, encoded);
+//         try testing.expectEqual(original, decoded);
+//     }
+
+//     // Test VarInt
+//     {
+//         const original = VarInt{ .value = 0xFFF };
+//         const encoded = try serialize(allocator, original);
+//         defer allocator.free(encoded);
+
+//         const decoded = try deserialize(VarInt, encoded);
+//         try testing.expectEqual(original.value, decoded.value);
+//     }
+
+//     // Test partial deserialization
+//     {
+//         const original: u16 = 12345;
+//         const buffer = try allocator.alloc(u8, 4);
+//         defer allocator.free(buffer);
+
+//         var stream = io.fixedBufferStream(buffer);
+//         _ = try Encodable(u16).init(original).consensus_encode(stream.writer());
+//         _ = try Encodable(u8).init(42).consensus_encode(stream.writer());
+
+//         const result = try deserializePartial(u16, buffer);
+//         try testing.expectEqual(original, result.value);
+//         try testing.expectEqual(@as(usize, 2), result.consumed);
+//     }
+// }

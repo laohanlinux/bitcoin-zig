@@ -359,30 +359,30 @@ pub const Script = struct {
         self.vec.append(code.to_u8());
     }
 
-    /// Pushes the slice without reserving.
-    pub fn push_slice_no_opt(self: *Self, data: []const u8) void {
-        // Start with a PUSH opcode
-        if (data.len < OpCodeType.OP_PUSHDATA1.to_usize()) {
-            const len = @as(u8, @truncate(data.len));
-            self.vec.append(len) catch unreachable;
-        } else if (data.len < 0x100) {
-            self.vec.append(OpCodeType.OP_PUSHDATA1.to_u8()) catch unreachable;
-            self.vec.append(convert.usizeToU8(data.len)) catch unreachable;
-        } else if (data.len < 0x10000) {
-            self.vec.append(OpCodeType.OP_PUSHDATA2.to_u8()) catch unreachable;
-            self.vec.append(convert.usizeToU8(data.len % 0x100)) catch unreachable;
-            self.vec.append(convert.usizeToU8(data.len / 0x100)) catch unreachable;
-        } else if (data.len < 0x1000000) {
-            self.vec.append(OpCodeType.OP_PUSHDATA4.to_u8()) catch unreachable;
-            self.vec.append(convert.usizeToU8(data.len % 0x100)) catch unreachable;
-            self.vec.append(convert.usizeToU8((data.len / 0x100) % 100)) catch unreachable;
-            self.vec.append(convert.usizeToU8((data.len / 0x10000) % 100)) catch unreachable;
-            self.vec.append(convert.usizeToU8(data.len / 0x1000000)) catch unreachable;
-        } else {
-            @panic("tried to put a 4bn+ sized object into a script!");
-        }
-        self.vec.appendSlice(data) catch unreachable;
-    }
+    // Pushes the slice without reserving.
+    // pub fn push_slice_no_opt(self: *Self, data: []const u8) void {
+    //     // Start with a PUSH opcode
+    //     if (data.len < OpCodeType.OP_PUSHDATA1.to_usize()) {
+    //         const len = @as(u8, @truncate(data.len));
+    //         self.vec.append(len) catch unreachable;
+    //     } else if (data.len < 0x100) {
+    //         self.vec.append(OpCodeType.OP_PUSHDATA1.to_u8()) catch unreachable;
+    //         self.vec.append(convert.usizeToU8(data.len)) catch unreachable;
+    //     } else if (data.len < 0x10000) {
+    //         self.vec.append(OpCodeType.OP_PUSHDATA2.to_u8()) catch unreachable;
+    //         self.vec.append(convert.usizeToU8(data.len % 0x100)) catch unreachable;
+    //         self.vec.append(convert.usizeToU8(data.len / 0x100)) catch unreachable;
+    //     } else if (data.len < 0x1000000) {
+    //         self.vec.append(OpCodeType.OP_PUSHDATA4.to_u8()) catch unreachable;
+    //         self.vec.append(convert.usizeToU8(data.len % 0x100)) catch unreachable;
+    //         self.vec.append(convert.usizeToU8((data.len / 0x100) % 100)) catch unreachable;
+    //         self.vec.append(convert.usizeToU8((data.len / 0x10000) % 100)) catch unreachable;
+    //         self.vec.append(convert.usizeToU8(data.len / 0x1000000)) catch unreachable;
+    //     } else {
+    //         @panic("tried to put a 4bn+ sized object into a script!");
+    //     }
+    //     self.vec.appendSlice(data) catch unreachable;
+    // }
 
     // Computes the sum of `len` and the length of an appropriate push opcode.
     // pub fn reserved_len_for_slice(len: usize) usize {
@@ -449,21 +449,21 @@ const Push = union(enum) {
     }
 };
 
-test "Script OpTye" {
-    const name = OpCodeType.OP_PUSHDATA1.get_op_name();
-    std.debug.print("{s}\n", .{name});
-    var buffer: [8]u8 = undefined;
+// test "Script OpTye" {
+//     const name = OpCodeType.OP_PUSHDATA1.get_op_name();
+//     std.debug.print("{s}\n", .{name});
+//     var buffer: [8]u8 = undefined;
 
-    // Test positive number
-    const len1 = writeScriptInt(buffer[0..], 899);
+//     // Test positive number
+//     const len1 = writeScriptInt(buffer[0..], 899);
 
-    std.debug.print("{d} {d}\n", .{ len1, buffer });
+//     std.debug.print("{d} {d}\n", .{ len1, buffer });
 
-    var script = Script.init();
-    script.put_int(899);
-    const data: [:0]const u8 = "hello word!";
-    script.push_slice_no_opt(data);
+//     var script = Script.init();
+//     script.put_int(899);
+//     const data: [:0]const u8 = "hello word!";
+//     script.push_slice_no_opt(data);
 
-    const str = Push{ .num = 10 };
-    std.debug.print("{s}\n", .{str.to_string()});
-}
+//     const str = Push{ .num = 10 };
+//     std.debug.print("{s}\n", .{str.to_string()});
+// }

@@ -10,9 +10,8 @@ pub const BlockHeader = struct {
 pub const Hash256 = struct {
     buf: [32]u8 = [1]u8{0} ** 32,
     h: hashes.HashEngine(hashes.HashType.sha256d),
-
     pub fn init() @This() {
-        return .{ .h = hashes.HashEngine(hashes.HashType.sha256d).init(buf) };
+        return .{ .h = hashes.HashEngine(hashes.HashType.sha256d).init(.{}) };
     }
 
     pub fn to_string(self: *@This(), allocator: std.mem.Allocator) ![]const u8 {
