@@ -24,6 +24,9 @@ const hex = hash.hex;
 const hashType = @import("hashtypes");
 const TxId = hashType.Txid;
 
+pub const Reader = io.FixedBufferStream([]const u8).Reader;
+pub const Writer = io.FixedBufferStream([]u8).Writer;
+
 /// encoding error
 pub const Error = error{
     /// I/O error
@@ -67,7 +70,8 @@ pub inline fn serializeHex(allocator: std.mem.Allocator, data: anytype) ![]u8 {
     return hex(allocator, bytes);
 }
 
-pub fn decodeVec(allocator: std.mem.Allocator, comptime T: type, data: []const u8) !T {
+/// Decode a vector of objects from a byte slice, return a slice of the objects
+pub fn decodeVec(allocator: std.mem.Allocator, comptime T: type, data: []const u8) ![]T {
     var reader = std.io.fixedBufferStream(data);
     const varint = try VarInt.init(0).consensusDecode(reader.reader());
     const len = varint.value;
@@ -75,15 +79,13 @@ pub fn decodeVec(allocator: std.mem.Allocator, comptime T: type, data: []const u
     if (byteSize > MAX_VEC_SIZE) {
         return Error.OversizedVectorAllocation;
     }
-    var result = try allocator.alloc(T, len);
+    const result = try allocator.alloc(T, len);
     errdefer allocator.free(result);
     var i: usize = 0;
     while (i < len) : (i += 1) {
-        result[i] = try decode(T, allocator, reader);
+        result[i] = try Decodable(T).init(.{ .allocator = allocator }).consensusDecode(reader);
     }
-    var t = std.ArrayList(T).init(allocator);
-    errdefer t.deinit();
-    return t.toOwnedSlice();
+    return result;
 }
 
 pub fn deserializeWithAllocator(allocator: std.mem.Allocator, comptime T: type, data: []const u8) !T {
@@ -107,6 +109,8 @@ pub fn deserialize(comptime T: type, data: []const u8) !T {
 
 fn deserializeWithReader(comptime T: type, reader: std.io.FixedBufferStream([]const u8).Reader) !T {
     var decoder = Decodable(T).init(.{});
+    const result = try decoder.consensusDecode(reader);
+    return result.value;
 }
 
 /// Deserialize an object from a byte slice, but don't require consuming the entire slice
@@ -198,18 +202,24 @@ pub fn Encodable(comptime T: type) type {
     };
 }
 
+/// Decode an object from a byte slice
 pub fn Decodable(comptime T: type) type {
     return struct {
         const Option = struct {
             allocator: ?std.mem.Allocator = null,
         };
-        pub const Reader = std.io.FixedBufferStream([]const u8).Reader;
 
         const Decoder = struct {
             value: T = undefined,
             bytes_read: usize = 0,
             allocator: ?std.mem.Allocator = null,
             pub fn consensusDecode(self: *Decoder, reader: Reader) !*Decoder {
+                if (std.mem.startsWith(u8, @typeName(T), "encode.Vec")) {
+                    const vec = try Vec(T).consensusDecode(self.allocator.?, reader);
+                    self.value = vec;
+                    self.bytes_read = vec.bytes_read;
+                    return self;
+                }
                 switch (T) {
                     bool => {
                         const n = try reader.readByte();
@@ -342,6 +352,12 @@ pub fn Decodable(comptime T: type) type {
                         self.bytes_read = dataLen + 8;
                         return self;
                     },
+                    Vec(T) => {
+                        const vec = try Vec(T).consensusDecode(self.allocator, reader);
+                        self.value = vec;
+                        self.bytes_read = vec.bytes_read;
+                        return self;
+                    },
                     else => @compileError("Unsupported type: " ++ @typeName(T)),
                 }
             }
@@ -375,7 +391,7 @@ fn sha2CheckSum(data: []const u8) [4]u8 {
     return [4]u8{ checksum[0], checksum[1], checksum[2], checksum[3] };
 }
 
-/// 可变长度无符号整数
+/// VarInt is a variable-length unsigned integer.
 pub const VarInt = struct {
     value: u64,
 
@@ -482,7 +498,7 @@ pub const VarInt = struct {
     }
 
     /// 解码VarInt, consensus_decode(reader)
-    pub fn consensusDecode(reader: anytype) !struct { value: VarInt, bytes_read: usize } {
+    pub fn consensusDecode(reader: Reader) !struct { value: VarInt, bytes_read: usize } {
         const n = try reader.readByte();
         switch (n) {
             0xFF => {
@@ -546,6 +562,48 @@ pub const CheckedData = struct {
         return .{ .data = data, .allocator = allocator };
     }
 };
+
+pub fn Vec(comptime T: type) type {
+    return struct {
+        data: std.ArrayList(T),
+
+        pub fn init(data: std.ArrayList(T)) Vec(T) {
+            return .{ .data = data };
+        }
+
+        // /// Encode a vector of objects
+        // pub fn consensusEncode(self: *const Vec(T), writer: anytype) !usize {
+        //     return self.consensus_encode(writer);
+        // }
+
+        /// Decode a vector of objects
+        pub fn consensusDecode(allocator: std.mem.Allocator, reader: Reader) !Vec(T) {
+            const varint = try VarInt.consensusDecode(reader);
+            const len = varint.value;
+            const byteSize = len.value * @sizeOf(T);
+            if (byteSize > MAX_VEC_SIZE) {
+                return Error.OversizedVectorAllocation;
+            }
+            const result = try allocator.alloc(T, len.value);
+            errdefer allocator.free(result);
+            var i: usize = 0;
+            while (i < len.value) : (i += 1) {
+                var dec = Decodable(T).init(.{ .allocator = allocator });
+                const dec_result = try dec.consensusDecode(reader);
+                result[i] = dec_result.value;
+            }
+            return result;
+        }
+
+        pub fn deinit(self: *Vec(T)) void {
+            self.data.deinit();
+        }
+
+        pub fn toOwned(self: Vec(T)) []T {
+            return self.data.toOwnedSlice();
+        }
+    };
+}
 
 /// 编码数据并返回长度
 pub fn consensusEncodeWithSize(data: []const u8, writer: anytype) !usize {
@@ -909,7 +967,7 @@ test "deserialize_vec_test" {
         testing.expect(err == error.ParseFailed) catch unreachable;
     };
 
-    _ = deserializeWithAllocator(testing.allocator, []const u64, &[_]u8{ 0xff, 0xff, 0xff, 0xff, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0xa, 0xa, 0x3a }) catch |err| {
+    _ = deserializeWithAllocator(testing.allocator, Vec(u64), &[_]u8{ 0xff, 0xff, 0xff, 0xff, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0xa, 0xa, 0x3a }) catch |err| {
         testing.expect(err == error.OversizedVectorAllocation) catch unreachable;
     };
 }
@@ -968,3 +1026,9 @@ test "deserialize_vec_test" {
 //         try testing.expectEqual(@as(usize, 2), result.consumed);
 //     }
 // }
+
+test "serialize_vec_test" {
+    // const vec = Vec(u8).init(testing.allocator);
+    std.testing.log_level = .debug;
+    std.log.info("vec: {s}\n", .{@typeName(Vec(u8))});
+}
