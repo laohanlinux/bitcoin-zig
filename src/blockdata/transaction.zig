@@ -7,6 +7,11 @@ const Hash256 = hash.HashEngine(.sha256);
 const Hash256d = hash.HashEngine(.sha256d);
 const hash_type = @import("../hash_types.zig");
 const Txid = hash_type.Txid;
+const encode = @import("../consensus/encode.zig");
+const VarInt = encode.VarInt;
+const DecoderOption = encode.DecoderOption;
+const EncoderOption = encode.EncoderOption;
+const Reader = encode.Reader;
 
 /// A Bitcoin transaction, which describes an authenticated movement of coins.
 ///
@@ -81,13 +86,34 @@ pub const Transaction = struct {
     /// to the output of `wtxid()`, but for segwit transactions,
     /// this will give the correct txid (not including witnesses) while `wtxid`
     /// will also hash witnesses.
-    pub fn txid(self: *const @This(), allocator: std.mem.Allocator) Txid {
+    pub fn txid(_: *const @This(), _: std.mem.Allocator) Txid {
         const h = Hash256.init();
         return h;
     }
 
     pub fn is_coin_base(self: *const @This()) bool {
         return self.input.items.len == 1 and self.input.items[0].prev_out.n == 0;
+    }
+
+    /// consensusEncode
+    pub fn consensusEncode(_: *const @This(), _: anytype) ![]u8 {
+        // var len: usize = 0;
+        // // version
+        // len += try encode.Encodable(i32).init(self.version).consensusEncode(writer);
+        // // witness
+        // var hasWitness: bool = false;
+        // for (self.input.items) |input| {
+        //     hasWitness = input.witness != null and input.witness.?.len > 0;
+        //     if (hasWitness) {
+        //         break;
+        //     }
+        // }
+        // // input
+        // len += try encode.Encodable(VarInt).init(self.input.items.len).consensusEncode(writer);
+        // // output
+        // len += try encode.Encodable(VarInt).init(self.output.items.len).consensusEncode(writer);
+        // // lock_time
+        // len += try encode.Encodable(u32).init(self.lock_time).consensusEncode(writer);
     }
 };
 
@@ -117,6 +143,10 @@ pub const TxIn = struct {
 
     pub fn init(prev_out: OutPoint, script_sig: Script, sequence: isize) Self {
         return .{ .prev_out = prev_out, .script_sig = script_sig, .sequence = sequence };
+    }
+
+    pub fn consensusEncode(_: *const @This(), _: anytype) ![]u8 {
+        @panic("not implemented");
     }
 };
 
