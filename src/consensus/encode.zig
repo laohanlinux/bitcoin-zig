@@ -102,11 +102,10 @@ pub fn deserializedVec(allocator: std.mem.Allocator, comptime T: type, data: []c
 pub fn deserializeWithAllocator(allocator: std.mem.Allocator, comptime T: type, data: []const u8) !T {
     const result = try deserializePartialWithAllocator(allocator, T, data);
     if (result.consumed != data.len) {
-        if (@hasDecl(T, "deinit")) {
-            result.value.deinit();
-        } else {
-            allocator.free(result.value);
+        if (hasFn(T, "deinit")) {
+            std.debug.print("it has deinit function, {s}\n", .{@typeName(T)});
         }
+        std.debug.print("the consumed is not equal to the data len, {s}\n", .{@typeName(T)});
         return Error.ParseFailed;
     }
     return result.value;
@@ -409,7 +408,6 @@ pub const CheckedData = struct {
     }
 
     pub fn consensusDecode(option: DecoderOption, reader: Reader) !@This() {
-        std.debug.print("run at consensus", .{});
         var allocator = option.allocator.?;
         const dataLen: u32 = reader.readInt(u32, .little) catch {
             return Error.IoError;
@@ -480,49 +478,19 @@ pub fn Vector(comptime T: type) type {
     };
 }
 
-pub fn Vec(comptime T: type) type {
-    return struct {
-        data: std.ArrayList(T),
-        const Self = @This();
-
-        pub fn init(data: std.ArrayList(T)) Self {
-            return .{ .data = data };
-        }
-
-        /// Decode a vector of objects
-        pub fn consensusDecode(allocator: std.mem.Allocator, reader: Reader) Error!Vec(T) {
-            const varint = try VarInt.consensusDecode(reader);
-            const len = varint.value;
-            const byteSize = len * @sizeOf(T);
-            if (byteSize > MAX_VEC_SIZE) {
-                return Error.OversizedVectorAllocation;
+fn hasFn(comptime a: type, fn_name: []const u8) bool {
+    const T = @TypeOf(a);
+    switch (@typeInfo(T)) {
+        .@"struct" => |info| {
+            inline for (info.fields) |field| {
+                if (std.mem.eql(u8, field.name, fn_name)) {
+                    return true;
+                }
             }
-            var result = std.ArrayList(T).init(allocator);
-            defer result.deinit();
-            const decoder = Decodable(T);
-            for (0..len) |_| {
-                const decoded = try decoder.consensusDecode(.{ .allocator = allocator }, reader);
-                result.append(decoded) catch unreachable;
-            }
-            return Vec(T).init(result);
-        }
-
-        pub fn deinit(self: *Self) void {
-            self.data.deinit();
-        }
-
-        pub fn toOwned(self: *Self) []T {
-            const s = self.data.toOwnedSlice() catch unreachable;
-            return s;
-        }
-    };
-}
-
-pub fn consensusEncodeWithSize(data: []const u8, writer: anytype) !usize {
-    const vi_len = VarInt.init(@as(u64, @intCast(data.len))).len();
-    try writer.writeInt(u32, data.len, .little);
-    try writer.writeAll(data);
-    return vi_len + data.len;
+            return false;
+        },
+        else => return false,
+    }
 }
 
 fn testVarIntEncode(n: u8, x: []const u8) Error!VarInt {
@@ -578,354 +546,351 @@ fn testLenIsMaxVec(allocator: std.mem.Allocator, comptime T: type) !void {
     const varint = VarInt.init(@as(u64, @intCast(MAX_VEC_SIZE / @sizeOf(T))));
     const encoded = try serialize(allocator, varint);
     defer allocator.free(encoded);
-    const s = std.fmt.allocPrint(allocator, "it should not reach here: T: {s}, MAX_VEC_SIZE: {d}, sizeOf(T): {d}, encoded len: {d}", .{ @typeName(T), MAX_VEC_SIZE, @sizeOf(T), encoded.len }) catch unreachable;
-    std.debug.print("{s}\n", .{s});
     _ = deserializedVec(allocator, T, encoded) catch |err| {
         try std.testing.expect(err == Error.IoError);
         return;
     };
-
-    @panic(s);
 }
 
-// test "serialize_int_test" {
-//     // bool
-//     {
-//         const args = [_]bool{ false, true };
-//         const expected = [_][]const u8{
-//             &[_]u8{0},
-//             &[_]u8{1},
-//         };
-//         for (args, expected) |arg, exp| {
-//             const allocator = testing.allocator;
-//             const encoded = try serialize(allocator, arg);
-//             defer allocator.free(encoded);
-//             try testing.expect(std.mem.eql(u8, encoded, exp));
-//         }
-//     }
+test "serialize_int_test" {
+    // bool
+    {
+        const args = [_]bool{ false, true };
+        const expected = [_][]const u8{
+            &[_]u8{0},
+            &[_]u8{1},
+        };
+        for (args, expected) |arg, exp| {
+            const allocator = testing.allocator;
+            const encoded = try serialize(allocator, arg);
+            defer allocator.free(encoded);
+            try testing.expect(std.mem.eql(u8, encoded, exp));
+        }
+    }
 
-//     // u8
-//     {
-//         const args = [_]u8{ 1, 0, 255 };
-//         const expected = [_][]const u8{
-//             &[_]u8{1},
-//             &[_]u8{0},
-//             &[_]u8{255},
-//         };
-//         for (args, expected) |arg, exp| {
-//             const allocator = testing.allocator;
-//             const encoded = try serialize(allocator, arg);
-//             defer allocator.free(encoded);
-//             try testing.expect(std.mem.eql(u8, encoded, exp));
-//         }
-//     }
+    // u8
+    {
+        const args = [_]u8{ 1, 0, 255 };
+        const expected = [_][]const u8{
+            &[_]u8{1},
+            &[_]u8{0},
+            &[_]u8{255},
+        };
+        for (args, expected) |arg, exp| {
+            const allocator = testing.allocator;
+            const encoded = try serialize(allocator, arg);
+            defer allocator.free(encoded);
+            try testing.expect(std.mem.eql(u8, encoded, exp));
+        }
+    }
 
-//     // u16
-//     {
-//         const args = [_]u16{ 1, 256, 5000 };
-//         const expected = [_][]const u8{
-//             &[_]u8{ 1, 0 },
-//             &[_]u8{ 0, 1 },
-//             &[_]u8{ 136, 19 },
-//         };
-//         for (args, expected) |arg, exp| {
-//             const encoded = try serialize(testing.allocator, arg);
-//             defer testing.allocator.free(encoded);
-//             try testing.expect(std.mem.eql(u8, encoded, exp));
-//         }
-//     }
+    // u16
+    {
+        const args = [_]u16{ 1, 256, 5000 };
+        const expected = [_][]const u8{
+            &[_]u8{ 1, 0 },
+            &[_]u8{ 0, 1 },
+            &[_]u8{ 136, 19 },
+        };
+        for (args, expected) |arg, exp| {
+            const encoded = try serialize(testing.allocator, arg);
+            defer testing.allocator.free(encoded);
+            try testing.expect(std.mem.eql(u8, encoded, exp));
+        }
+    }
 
-//     // u32
-//     {
-//         const args = [_]u32{ 1, 256, 5000, 500000, 168430090 };
-//         const expected = [_][]const u8{
-//             &[_]u8{ 1, 0, 0, 0 },
-//             &[_]u8{ 0, 1, 0, 0 },
-//             &[_]u8{ 136, 19, 0, 0 },
-//             &[_]u8{ 32, 161, 7, 0 },
-//             &[_]u8{ 10, 10, 10, 10 },
-//         };
-//         for (args, expected) |arg, exp| {
-//             const encoded = try serialize(testing.allocator, arg);
-//             defer testing.allocator.free(encoded);
-//             try testing.expect(std.mem.eql(u8, encoded, exp));
-//         }
-//     }
+    // u32
+    {
+        const args = [_]u32{ 1, 256, 5000, 500000, 168430090 };
+        const expected = [_][]const u8{
+            &[_]u8{ 1, 0, 0, 0 },
+            &[_]u8{ 0, 1, 0, 0 },
+            &[_]u8{ 136, 19, 0, 0 },
+            &[_]u8{ 32, 161, 7, 0 },
+            &[_]u8{ 10, 10, 10, 10 },
+        };
+        for (args, expected) |arg, exp| {
+            const encoded = try serialize(testing.allocator, arg);
+            defer testing.allocator.free(encoded);
+            try testing.expect(std.mem.eql(u8, encoded, exp));
+        }
+    }
 
-//     // i32
-//     {
-//         const args = [_]i32{ -1, -256, -5000, -500000, -168430090, 1, 256, 5000, 500000, 168430090 };
-//         const expected = [_][]const u8{
-//             &[_]u8{ 255, 255, 255, 255 },
-//             &[_]u8{ 0, 255, 255, 255 },
-//             &[_]u8{ 120, 236, 255, 255 },
-//             &[_]u8{ 224, 94, 248, 255 },
-//             &[_]u8{ 246, 245, 245, 245 },
-//             &[_]u8{ 1, 0, 0, 0 },
-//             &[_]u8{ 0, 1, 0, 0 },
-//             &[_]u8{ 136, 19, 0, 0 },
-//             &[_]u8{ 32, 161, 7, 0 },
-//             &[_]u8{ 10, 10, 10, 10 },
-//         };
-//         for (args, expected) |arg, exp| {
-//             const encoded = try serialize(testing.allocator, arg);
-//             defer testing.allocator.free(encoded);
-//             try testing.expect(std.mem.eql(u8, encoded, exp));
-//         }
-//     }
+    // i32
+    {
+        const args = [_]i32{ -1, -256, -5000, -500000, -168430090, 1, 256, 5000, 500000, 168430090 };
+        const expected = [_][]const u8{
+            &[_]u8{ 255, 255, 255, 255 },
+            &[_]u8{ 0, 255, 255, 255 },
+            &[_]u8{ 120, 236, 255, 255 },
+            &[_]u8{ 224, 94, 248, 255 },
+            &[_]u8{ 246, 245, 245, 245 },
+            &[_]u8{ 1, 0, 0, 0 },
+            &[_]u8{ 0, 1, 0, 0 },
+            &[_]u8{ 136, 19, 0, 0 },
+            &[_]u8{ 32, 161, 7, 0 },
+            &[_]u8{ 10, 10, 10, 10 },
+        };
+        for (args, expected) |arg, exp| {
+            const encoded = try serialize(testing.allocator, arg);
+            defer testing.allocator.free(encoded);
+            try testing.expect(std.mem.eql(u8, encoded, exp));
+        }
+    }
 
-//     // u64
-//     {
-//         const args = [_]u64{ 1, 256, 5000, 500000, 723401728380766730 };
-//         const expected = [_][]const u8{
-//             &[_]u8{ 1, 0, 0, 0, 0, 0, 0, 0 },
-//             &[_]u8{ 0, 1, 0, 0, 0, 0, 0, 0 },
-//             &[_]u8{ 136, 19, 0, 0, 0, 0, 0, 0 },
-//             &[_]u8{ 32, 161, 7, 0, 0, 0, 0, 0 },
-//             &[_]u8{ 10, 10, 10, 10, 10, 10, 10, 10 },
-//         };
-//         for (args, expected) |arg, exp| {
-//             const encoded = try serialize(testing.allocator, arg);
-//             defer testing.allocator.free(encoded);
-//             try testing.expect(std.mem.eql(u8, encoded, exp));
-//         }
-//     }
+    // u64
+    {
+        const args = [_]u64{ 1, 256, 5000, 500000, 723401728380766730 };
+        const expected = [_][]const u8{
+            &[_]u8{ 1, 0, 0, 0, 0, 0, 0, 0 },
+            &[_]u8{ 0, 1, 0, 0, 0, 0, 0, 0 },
+            &[_]u8{ 136, 19, 0, 0, 0, 0, 0, 0 },
+            &[_]u8{ 32, 161, 7, 0, 0, 0, 0, 0 },
+            &[_]u8{ 10, 10, 10, 10, 10, 10, 10, 10 },
+        };
+        for (args, expected) |arg, exp| {
+            const encoded = try serialize(testing.allocator, arg);
+            defer testing.allocator.free(encoded);
+            try testing.expect(std.mem.eql(u8, encoded, exp));
+        }
+    }
 
-//     // i64
-//     {
-//         const args = [_]i64{ -1, -256, -5000, -500000, -723401728380766730, 1, 256, 5000, 500000, 723401728380766730 };
-//         const expected = [_][]const u8{
-//             &[_]u8{ 255, 255, 255, 255, 255, 255, 255, 255 },
-//             &[_]u8{ 0, 255, 255, 255, 255, 255, 255, 255 },
-//             &[_]u8{ 120, 236, 255, 255, 255, 255, 255, 255 },
-//             &[_]u8{ 224, 94, 248, 255, 255, 255, 255, 255 },
-//             &[_]u8{ 246, 245, 245, 245, 245, 245, 245, 245 },
-//             &[_]u8{ 1, 0, 0, 0, 0, 0, 0, 0 },
-//             &[_]u8{ 0, 1, 0, 0, 0, 0, 0, 0 },
-//             &[_]u8{ 136, 19, 0, 0, 0, 0, 0, 0 },
-//             &[_]u8{ 32, 161, 7, 0, 0, 0, 0, 0 },
-//             &[_]u8{ 10, 10, 10, 10, 10, 10, 10, 10 },
-//         };
-//         for (args, expected) |arg, exp| {
-//             const encoded = try serialize(testing.allocator, arg);
-//             defer testing.allocator.free(encoded);
-//             try testing.expect(std.mem.eql(u8, encoded, exp));
-//         }
-//     }
-// }
+    // i64
+    {
+        const args = [_]i64{ -1, -256, -5000, -500000, -723401728380766730, 1, 256, 5000, 500000, 723401728380766730 };
+        const expected = [_][]const u8{
+            &[_]u8{ 255, 255, 255, 255, 255, 255, 255, 255 },
+            &[_]u8{ 0, 255, 255, 255, 255, 255, 255, 255 },
+            &[_]u8{ 120, 236, 255, 255, 255, 255, 255, 255 },
+            &[_]u8{ 224, 94, 248, 255, 255, 255, 255, 255 },
+            &[_]u8{ 246, 245, 245, 245, 245, 245, 245, 245 },
+            &[_]u8{ 1, 0, 0, 0, 0, 0, 0, 0 },
+            &[_]u8{ 0, 1, 0, 0, 0, 0, 0, 0 },
+            &[_]u8{ 136, 19, 0, 0, 0, 0, 0, 0 },
+            &[_]u8{ 32, 161, 7, 0, 0, 0, 0, 0 },
+            &[_]u8{ 10, 10, 10, 10, 10, 10, 10, 10 },
+        };
+        for (args, expected) |arg, exp| {
+            const encoded = try serialize(testing.allocator, arg);
+            defer testing.allocator.free(encoded);
+            try testing.expect(std.mem.eql(u8, encoded, exp));
+        }
+    }
+}
 
-// test "serialize_varint_test" {
-//     var area = std.heap.ArenaAllocator.init(std.testing.allocator);
-//     defer area.deinit();
-//     {
-//         const args = [_]VarInt{ VarInt.init(10), VarInt.init(0xFC), VarInt.init(0xFD), VarInt.init(0xFFF), VarInt.init(0xF0F0F0F), VarInt.init(0xF0F0F0F0F0E0) };
-//         const encoded = [_][]const u8{
-//             &[_]u8{10},
-//             &[_]u8{0xFC},
-//             &[_]u8{ 0xFD, 0xFD, 0 },
-//             &[_]u8{ 0xFD, 0xFF, 0xF },
-//             &[_]u8{ 0xFE, 0xF, 0xF, 0xF, 0xF },
-//             &[_]u8{ 0xFF, 0xE0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0, 0 },
-//         };
-//         for (args, encoded) |arg, exp| {
-//             const got = try serialize(area.allocator(), arg);
-//             try testing.expect(std.mem.eql(u8, got, exp));
-//         }
-//     }
-//     {
-//         const preArgs = [_]u8{ 0xFF, 0xFE, 0xFD };
-//         const args = [_]VarInt{ VarInt.init(0x100000000), VarInt.init(0x10000), VarInt.init(0xFD) };
-//         const encoded = [_][8]u8{
-//             toArrayLe(0x100000000, 8),
-//             toArrayLe(0x10000, 8),
-//             toArrayLe(0xFD, 8),
-//         };
-//         for (0..args.len) |i| {
-//             const got = try testVarIntEncode(preArgs[i], &encoded[i]);
-//             try testing.expectEqual(got.value, args[i].value);
-//         }
-//     }
+test "serialize_varint_test" {
+    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer area.deinit();
+    {
+        const args = [_]VarInt{ VarInt.init(10), VarInt.init(0xFC), VarInt.init(0xFD), VarInt.init(0xFFF), VarInt.init(0xF0F0F0F), VarInt.init(0xF0F0F0F0F0E0) };
+        const encoded = [_][]const u8{
+            &[_]u8{10},
+            &[_]u8{0xFC},
+            &[_]u8{ 0xFD, 0xFD, 0 },
+            &[_]u8{ 0xFD, 0xFF, 0xF },
+            &[_]u8{ 0xFE, 0xF, 0xF, 0xF, 0xF },
+            &[_]u8{ 0xFF, 0xE0, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0, 0 },
+        };
+        for (args, encoded) |arg, exp| {
+            const got = try serialize(area.allocator(), arg);
+            try testing.expect(std.mem.eql(u8, got, exp));
+        }
+    }
+    {
+        const preArgs = [_]u8{ 0xFF, 0xFE, 0xFD };
+        const args = [_]VarInt{ VarInt.init(0x100000000), VarInt.init(0x10000), VarInt.init(0xFD) };
+        const encoded = [_][8]u8{
+            toArrayLe(0x100000000, 8),
+            toArrayLe(0x10000, 8),
+            toArrayLe(0xFD, 8),
+        };
+        for (0..args.len) |i| {
+            const got = try testVarIntEncode(preArgs[i], &encoded[i]);
+            try testing.expectEqual(got.value, args[i].value);
+        }
+    }
 
-//     // Test that length calc is working correctly
-//     {
-//         try testVarIntLen(VarInt.init(0), 1);
-//         try testVarIntLen(VarInt.init(0xFC), 1);
-//         try testVarIntLen(VarInt.init(0xFD), 3);
-//         try testVarIntLen(VarInt.init(0xFFFF), 3);
-//         try testVarIntLen(VarInt.init(0x10000), 5);
-//         try testVarIntLen(VarInt.init(0xFFFFFFFF), 5);
-//         try testVarIntLen(VarInt.init(0xFFFFFFFF + 1), 9);
-//         try testVarIntLen(VarInt.init(std.math.maxInt(u64)), 9);
-//     }
-// }
+    // Test that length calc is working correctly
+    {
+        try testVarIntLen(VarInt.init(0), 1);
+        try testVarIntLen(VarInt.init(0xFC), 1);
+        try testVarIntLen(VarInt.init(0xFD), 3);
+        try testVarIntLen(VarInt.init(0xFFFF), 3);
+        try testVarIntLen(VarInt.init(0x10000), 5);
+        try testVarIntLen(VarInt.init(0xFFFFFFFF), 5);
+        try testVarIntLen(VarInt.init(0xFFFFFFFF + 1), 9);
+        try testVarIntLen(VarInt.init(std.math.maxInt(u64)), 9);
+    }
+}
 
-// test "deserialize_nonminimal_vec" {
-//     // Check the edges for variant int
-//     _ = testVarIntEncode(0xFF, &toArrayLe(0x100000000 - 1, 8)) catch |err| {
-//         try testing.expect(err == error.NonMinimalVarInt);
-//     };
-//     _ = testVarIntEncode(0xFE, &toArrayLe(0x10000 - 1, 4)) catch |err| {
-//         try testing.expect(err == error.NonMinimalVarInt);
-//     };
-//     _ = testVarIntEncode(0xFD, &toArrayLe(0xFD - 1, 2)) catch |err| {
-//         try testing.expect(err == error.NonMinimalVarInt);
-//     };
-//     std.testing.log_level = .debug;
+test "deserialize_nonminimal_vec" {
+    // Check the edges for variant int
+    _ = testVarIntEncode(0xFF, &toArrayLe(0x100000000 - 1, 8)) catch |err| {
+        try testing.expect(err == error.NonMinimalVarInt);
+    };
+    _ = testVarIntEncode(0xFE, &toArrayLe(0x10000 - 1, 4)) catch |err| {
+        try testing.expect(err == error.NonMinimalVarInt);
+    };
+    _ = testVarIntEncode(0xFD, &toArrayLe(0xFD - 1, 2)) catch |err| {
+        try testing.expect(err == error.NonMinimalVarInt);
+    };
+    std.testing.log_level = .debug;
 
-//     {
-//         _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfd, 0x00, 0x00 }) catch |err| {
-//             try testing.expect(err == error.NonMinimalVarInt);
-//         };
+    {
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfd, 0x00, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
 
-//         _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfd, 0xfc, 0x00 }) catch |err| {
-//             try testing.expect(err == error.NonMinimalVarInt);
-//         };
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfd, 0xfc, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
 
-//         _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfe, 0xff, 0x00, 0x00, 0x00 }) catch |err| {
-//             try testing.expect(err == error.NonMinimalVarInt);
-//         };
-//         _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfe, 0xff, 0xff, 0x00, 0x00 }) catch |err| {
-//             try testing.expect(err == error.NonMinimalVarInt);
-//         };
-//         _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }) catch |err| {
-//             try testing.expect(err == error.NonMinimalVarInt);
-//         };
-//         _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00 }) catch |err| {
-//             try testing.expect(err == error.NonMinimalVarInt);
-//         };
-//     }
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfe, 0xff, 0x00, 0x00, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xfe, 0xff, 0xff, 0x00, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
+        _ = deserializeWithAllocator(testing.allocator, []u8, &[_]u8{ 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00 }) catch |err| {
+            try testing.expect(err == error.NonMinimalVarInt);
+        };
+    }
 
-//     var vec256 = [_]u8{0x00} ** 259;
-//     vec256[0] = 0xfd;
-//     vec256[1] = 0x00;
-//     vec256[2] = 0x01;
-//     const result = deserializeWithAllocator(testing.allocator, []u8, &vec256) catch unreachable;
-//     defer testing.allocator.free(result);
-//     var vec253 = [_]u8{0x00} ** 256;
-//     vec253[0] = 0xfd;
-//     vec253[1] = 0xfd;
-//     vec253[2] = 0x00;
-//     const result2 = deserializeWithAllocator(testing.allocator, []u8, &vec253) catch unreachable;
-//     defer testing.allocator.free(result2);
-// }
+    var vec256 = [_]u8{0x00} ** 259;
+    vec256[0] = 0xfd;
+    vec256[1] = 0x00;
+    vec256[2] = 0x01;
+    const result = deserializeWithAllocator(testing.allocator, []u8, &vec256) catch unreachable;
+    defer testing.allocator.free(result);
+    var vec253 = [_]u8{0x00} ** 256;
+    vec253[0] = 0xfd;
+    vec253[1] = 0xfd;
+    vec253[2] = 0x00;
+    const result2 = deserializeWithAllocator(testing.allocator, []u8, &vec253) catch unreachable;
+    defer testing.allocator.free(result2);
+}
 
-// test "serialize_strbuf_test" {
-//     const str: []const u8 = "Andrew";
-//     const encoded = try serialize(testing.allocator, str);
-//     defer testing.allocator.free(encoded);
-//     try testing.expect(std.mem.eql(u8, encoded, &[_]u8{ 6, 0x41, 0x6e, 0x64, 0x72, 0x65, 0x77 }));
-// }
+test "serialize_strbuf_test" {
+    const str: []const u8 = "Andrew";
+    const encoded = try serialize(testing.allocator, str);
+    defer testing.allocator.free(encoded);
+    try testing.expect(std.mem.eql(u8, encoded, &[_]u8{ 6, 0x41, 0x6e, 0x64, 0x72, 0x65, 0x77 }));
+}
 
-// test "deserialize_int_test" {
-//     // bool
-//     {
-//         _ = deserialize(bool, &[_]u8{ 58, 0 }) catch |err| {
-//             try testing.expect(err == error.ParseFailed);
-//         };
-//         _ = deserialize(bool, &[_]u8{58}) catch unreachable;
-//         _ = deserialize(bool, &[_]u8{1}) catch unreachable;
-//         _ = deserialize(bool, &[_]u8{0}) catch unreachable;
-//         _ = deserialize(bool, &[_]u8{ 0, 1 }) catch |err| {
-//             try testing.expect(err == error.ParseFailed);
-//         };
-//     }
+test "deserialize_int_test" {
+    // bool
+    {
+        _ = deserialize(bool, &[_]u8{ 58, 0 }) catch |err| {
+            try testing.expect(err == error.ParseFailed);
+        };
+        _ = deserialize(bool, &[_]u8{58}) catch unreachable;
+        _ = deserialize(bool, &[_]u8{1}) catch unreachable;
+        _ = deserialize(bool, &[_]u8{0}) catch unreachable;
+        _ = deserialize(bool, &[_]u8{ 0, 1 }) catch |err| {
+            try testing.expect(err == error.ParseFailed);
+        };
+    }
 
-//     // u8
-//     {
-//         _ = deserialize(u8, &[_]u8{58}) catch unreachable;
-//     }
+    // u8
+    {
+        _ = deserialize(u8, &[_]u8{58}) catch unreachable;
+    }
 
-//     // u16
-//     {
-//         const got = try deserialize(u16, &[_]u8{ 0x01, 0x02 });
-//         try testing.expectEqual(got, 0x0201);
-//         const got2 = try deserialize(u16, &[_]u8{ 0xAB, 0xCD });
-//         try testing.expectEqual(got2, 0xCDAB);
-//         const got3 = try deserialize(u16, &[_]u8{ 0xA0, 0x0D });
-//         try testing.expectEqual(got3, 0xDA0);
-//         _ = deserialize(u16, &[_]u8{1}) catch |err| {
-//             try testing.expect(err == error.IoError);
-//         };
-//     }
-//     // u32
-//     {
-//         const got = try deserialize(u32, &[_]u8{ 0xAB, 0xCD, 0, 0 });
-//         try testing.expectEqual(got, 0xCDAB);
-//         const got2 = try deserialize(u32, &[_]u8{ 0xA0, 0x0D, 0xAB, 0xCD });
-//         try testing.expectEqual(got2, 0xCDAB0DA0);
-//         _ = deserialize(u32, &[_]u8{ 1, 2, 3 }) catch |err| {
-//             try testing.expect(err == error.IoError);
-//         };
+    // u16
+    {
+        const got = try deserialize(u16, &[_]u8{ 0x01, 0x02 });
+        try testing.expectEqual(got, 0x0201);
+        const got2 = try deserialize(u16, &[_]u8{ 0xAB, 0xCD });
+        try testing.expectEqual(got2, 0xCDAB);
+        const got3 = try deserialize(u16, &[_]u8{ 0xA0, 0x0D });
+        try testing.expectEqual(got3, 0xDA0);
+        _ = deserialize(u16, &[_]u8{1}) catch |err| {
+            try testing.expect(err == error.IoError);
+        };
+    }
+    // u32
+    {
+        const got = try deserialize(u32, &[_]u8{ 0xAB, 0xCD, 0, 0 });
+        try testing.expectEqual(got, 0xCDAB);
+        const got2 = try deserialize(u32, &[_]u8{ 0xA0, 0x0D, 0xAB, 0xCD });
+        try testing.expectEqual(got2, 0xCDAB0DA0);
+        _ = deserialize(u32, &[_]u8{ 1, 2, 3 }) catch |err| {
+            try testing.expect(err == error.IoError);
+        };
 
-//         const got3 = try deserialize(i32, &[_]u8{ 0xAB, 0xCD, 0, 0 });
-//         try testing.expectEqual(got3, 0xCDAB);
-//         const got4 = try deserialize(i32, &[_]u8{ 0xA0, 0x0D, 0xAB, 0x2D });
-//         try testing.expectEqual(got4, 0x2DAB0DA0);
-//         _ = deserialize(i32, &[_]u8{ 1, 2, 3 }) catch |err| {
-//             try testing.expect(err == error.IoError);
-//         };
-//     }
+        const got3 = try deserialize(i32, &[_]u8{ 0xAB, 0xCD, 0, 0 });
+        try testing.expectEqual(got3, 0xCDAB);
+        const got4 = try deserialize(i32, &[_]u8{ 0xA0, 0x0D, 0xAB, 0x2D });
+        try testing.expectEqual(got4, 0x2DAB0DA0);
+        _ = deserialize(i32, &[_]u8{ 1, 2, 3 }) catch |err| {
+            try testing.expect(err == error.IoError);
+        };
+    }
 
-//     // u64
-//     {
-//         const got = try deserialize(u64, &[_]u8{ 0xAB, 0xCD, 0, 0, 0, 0, 0, 0 });
-//         try testing.expectEqual(got, 0xCDAB);
-//         const got2 = try deserialize(u64, &[_]u8{ 0xA0, 0x0D, 0xAB, 0xCD, 0x99, 0, 0, 0x99 });
-//         try testing.expectEqual(got2, 0x99000099CDAB0DA0);
-//         _ = deserialize(u64, &[_]u8{ 1, 2, 3, 4, 5, 6, 7 }) catch |err| {
-//             try testing.expect(err == error.IoError);
-//         };
+    // u64
+    {
+        const got = try deserialize(u64, &[_]u8{ 0xAB, 0xCD, 0, 0, 0, 0, 0, 0 });
+        try testing.expectEqual(got, 0xCDAB);
+        const got2 = try deserialize(u64, &[_]u8{ 0xA0, 0x0D, 0xAB, 0xCD, 0x99, 0, 0, 0x99 });
+        try testing.expectEqual(got2, 0x99000099CDAB0DA0);
+        _ = deserialize(u64, &[_]u8{ 1, 2, 3, 4, 5, 6, 7 }) catch |err| {
+            try testing.expect(err == error.IoError);
+        };
 
-//         const got3 = try deserialize(i64, &[_]u8{ 0xAB, 0xCD, 0, 0, 0, 0, 0, 0 });
-//         try testing.expectEqual(got3, 0xCDAB);
-//         const got4 = try deserialize(i64, &[_]u8{ 0xA0, 0x0D, 0xAB, 0xCD, 0x99, 0, 0, 0x99 });
-//         try testing.expectEqual(got4, -0x66ffff663254f260);
-//         _ = deserialize(i64, &[_]u8{ 1, 2, 3, 4, 5, 6, 7 }) catch |err| {
-//             try testing.expect(err == error.IoError);
-//         };
-//     }
-// }
+        const got3 = try deserialize(i64, &[_]u8{ 0xAB, 0xCD, 0, 0, 0, 0, 0, 0 });
+        try testing.expectEqual(got3, 0xCDAB);
+        const got4 = try deserialize(i64, &[_]u8{ 0xA0, 0x0D, 0xAB, 0xCD, 0x99, 0, 0, 0x99 });
+        try testing.expectEqual(got4, -0x66ffff663254f260);
+        _ = deserialize(i64, &[_]u8{ 1, 2, 3, 4, 5, 6, 7 }) catch |err| {
+            try testing.expect(err == error.IoError);
+        };
+    }
+}
 
-// test "deserialize_vec_test" {
-//     var area = std.heap.ArenaAllocator.init(std.testing.allocator);
-//     defer area.deinit();
-//     const got = try deserializeWithAllocator(area.allocator(), []const u8, &[_]u8{ 3, 2, 3, 4 });
-//     try testing.expectEqualSlices(u8, got, &[_]u8{ 2, 3, 4 });
-//     _ = deserializeWithAllocator(area.allocator(), []const u8, &[_]u8{ 4, 2, 3, 4, 5, 6 }) catch |err| {
-//         testing.expect(err == error.ParseFailed) catch unreachable;
-//     };
-//     _ = deserializeWithAllocator(area.allocator(), []u64, &[_]u8{ 0xff, 0xff, 0xff, 0xff, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0xa, 0xa, 0x3a }) catch |err| {
-//         testing.expect(err == error.OversizedVectorAllocation) catch unreachable;
-//     };
+test "deserialize_vec_test" {
+    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer area.deinit();
+    const got = try deserializeWithAllocator(area.allocator(), []const u8, &[_]u8{ 3, 2, 3, 4 });
+    try testing.expectEqualSlices(u8, got, &[_]u8{ 2, 3, 4 });
+    _ = deserializeWithAllocator(area.allocator(), []const u8, &[_]u8{ 4, 2, 3, 4, 5, 6 }) catch |err| {
+        testing.expect(err == error.ParseFailed) catch unreachable;
+    };
+    _ = deserializeWithAllocator(area.allocator(), []u64, &[_]u8{ 0xff, 0xff, 0xff, 0xff, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0xa, 0xa, 0x3a }) catch |err| {
+        testing.expect(err == error.OversizedVectorAllocation) catch unreachable;
+    };
 
-//     // Check serialization that `if len > MAX_VEC_SIZE {return err}` isn't inclusive,
-//     // by making sure it fails with IO Error and not an `OversizedVectorAllocation` Error.
-//     {
-//         _ = deserializeWithAllocator(area.allocator(), CheckedData, serialize(area.allocator(), @as(u32, MAX_VEC_SIZE)) catch unreachable) catch |err| {
-//             try std.testing.expect(err == Error.IoError);
-//         };
-//         testLenIsMaxVec(area.allocator(), u8) catch unreachable;
-//         testLenIsMaxVec(area.allocator(), hashType.BlockHash) catch unreachable;
-//         testLenIsMaxVec(area.allocator(), hashType.FilterHash) catch unreachable;
-//         testLenIsMaxVec(area.allocator(), hashType.TxMerkleNode) catch unreachable;
-//         // test_len_is_max_vec::<Transaction>();
-//         // test_len_is_max_vec::<TxOut>();
-//         // test_len_is_max_vec::<TxIn>();
-//         // test_len_is_max_vec::<Inventory>();
-//         testLenIsMaxVec(area.allocator(), []const u8) catch unreachable;
-//         //  test_len_is_max_vec::<(u32, Address)>();
-//         testLenIsMaxVec(area.allocator(), u64) catch unreachable;
-//     }
-// }
+    // Check serialization that `if len > MAX_VEC_SIZE {return err}` isn't inclusive,
+    // by making sure it fails with IO Error and not an `OversizedVectorAllocation` Error.
+    {
+        _ = deserializeWithAllocator(area.allocator(), CheckedData, serialize(area.allocator(), @as(u32, MAX_VEC_SIZE)) catch unreachable) catch |err| {
+            try std.testing.expect(err == Error.IoError);
+        };
+        testLenIsMaxVec(area.allocator(), u8) catch unreachable;
+        testLenIsMaxVec(area.allocator(), hashType.BlockHash) catch unreachable;
+        testLenIsMaxVec(area.allocator(), hashType.FilterHash) catch unreachable;
+        testLenIsMaxVec(area.allocator(), hashType.TxMerkleNode) catch unreachable;
+        // test_len_is_max_vec::<Transaction>();
+        // test_len_is_max_vec::<TxOut>();
+        // test_len_is_max_vec::<TxIn>();
+        // test_len_is_max_vec::<Inventory>();
+        testLenIsMaxVec(area.allocator(), []const u8) catch unreachable;
+        //  test_len_is_max_vec::<(u32, Address)>();
+        testLenIsMaxVec(area.allocator(), u64) catch unreachable;
+    }
+}
 
-// test "deserialize_strbuf_test" {
-//     // var area = std.heap.ArenaAllocator.init(std.testing.allocator);
-//     //  defer area.deinit();
-//     //  const str = deserializeWithAllocator(area.allocator(), []const u8, &[_]u8{ 6, 0x41, 0x6e, 0x64, 0x72, 0x65, 0x77 }) catch unreachable;
-//     //  try testing.expect(std.mem.eql(u8, str, "Andrew"));
-// }
+test "deserialize_strbuf_test" {
+    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer area.deinit();
+    const str = deserializeWithAllocator(area.allocator(), []const u8, &[_]u8{ 6, 0x41, 0x6e, 0x64, 0x72, 0x65, 0x77 }) catch unreachable;
+    try testing.expect(std.mem.eql(u8, str, "Andrew"));
+}
 
 test "deserialize_checkeddata_test" {
+    std.testing.log_level = .debug;
     var area = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer area.deinit();
     const checkSum = try deserializeWithAllocator(area.allocator(), CheckedData, &[_]u8{ 5, 0, 0, 0, 162, 107, 175, 90, 1, 2, 3, 4, 5 });
@@ -994,67 +959,72 @@ test "serialization_round_trips" {
     }
 }
 
-// test "serialize_checked_data" {
-//     const data = CheckedData{ .data = &[_]u8{ 1, 2, 3, 4, 5 }, .allocator = testing.allocator };
-//     const encoded = try serialize(testing.allocator, data);
-//     defer testing.allocator.free(encoded);
-//     try testing.expect(std.mem.eql(u8, encoded, &[_]u8{ 5, 0, 0, 0, 162, 107, 175, 90, 1, 2, 3, 4, 5 }));
-//     std.testing.log_level = .debug;
-// }
+test "serialize_checked_data" {
+    const data = CheckedData{ .data = &[_]u8{ 1, 2, 3, 4, 5 }, .allocator = testing.allocator };
+    const encoded = try serialize(testing.allocator, data);
+    defer testing.allocator.free(encoded);
+    try testing.expect(std.mem.eql(u8, encoded, &[_]u8{ 5, 0, 0, 0, 162, 107, 175, 90, 1, 2, 3, 4, 5 }));
+    std.testing.log_level = .debug;
+}
 
-// test "encodable" {
-//     var _i8 = Encodable(i8).init(1);
-//     var buffer = std.ArrayList(u8).init(std.testing.allocator);
-//     defer buffer.deinit();
-//     const nsize = try _i8.consensusEncode(buffer.writer());
-//     try std.testing.expectEqual(nsize, 1);
-// }
+test "encodable" {
+    var _i8 = Encodable(i8).init(1);
+    var buffer = std.ArrayList(u8).init(std.testing.allocator);
+    defer buffer.deinit();
+    const nsize = try _i8.consensusEncode(buffer.writer());
+    try std.testing.expectEqual(nsize, 1);
+}
 
-// test "serialize and deserialize" {
-//     const allocator = testing.allocator;
+test "serialize and deserialize" {
+    const allocator = testing.allocator;
 
-//     // Test integers
-//     {
-//         const original: u32 = 12345678;
-//         const encoded = try serialize(allocator, original);
-//         defer allocator.free(encoded);
+    // Test integers
+    {
+        const original: u32 = 12345678;
+        const encoded = try serialize(allocator, original);
+        defer allocator.free(encoded);
 
-//         const decoded = try deserialize(u32, encoded);
-//         try testing.expectEqual(original, decoded);
-//     }
+        const decoded = try deserialize(u32, encoded);
+        try testing.expectEqual(original, decoded);
+    }
 
-//     // Test VarInt
-//     {
-//         const original = VarInt{ .value = 0xFFF };
-//         const encoded = try serialize(allocator, original);
-//         defer allocator.free(encoded);
+    // Test VarInt
+    {
+        const original = VarInt{ .value = 0xFFF };
+        const encoded = try serialize(allocator, original);
+        defer allocator.free(encoded);
 
-//         const decoded = try deserialize(VarInt, encoded);
-//         try testing.expectEqual(original.value, decoded.value);
-//     }
+        const decoded = try deserialize(VarInt, encoded);
+        try testing.expectEqual(original.value, decoded.value);
+    }
 
-//     // Test partial deserialization
-//     {
-//         const original: u16 = 12345;
-//         const buffer = try allocator.alloc(u8, 4);
-//         defer allocator.free(buffer);
+    // Test partial deserialization
+    {
+        const original: u16 = 12345;
+        const buffer = try allocator.alloc(u8, 4);
+        defer allocator.free(buffer);
 
-//         var stream = io.fixedBufferStream(buffer);
-//         _ = try Encodable(u16).init(original).consensusEncode(stream.writer());
-//         _ = try Encodable(u8).init(42).consensusEncode(stream.writer());
+        var stream = io.fixedBufferStream(buffer);
+        _ = try Encodable(u16).init(original).consensusEncode(stream.writer());
+        _ = try Encodable(u8).init(42).consensusEncode(stream.writer());
 
-//         const result = try deserializePartial(u16, buffer);
-//         try testing.expectEqual(original, result.value);
-//         try testing.expectEqual(@as(usize, 2), result.consumed);
-//     }
-// }
-// test "serialize_vec_test" {
-//     // const vec = Vec(u8).init(testing.allocator);
-//     std.testing.log_level = .debug;
-//     std.log.info("vec: {s}\n", .{@typeName(Vec(u8))});
-// }
+        const result = try deserializePartial(u16, buffer);
+        try testing.expectEqual(original, result.value);
+        try testing.expectEqual(@as(usize, 2), result.consumed);
+    }
+}
 
-// test {
-//     std.testing.refAllDecls(@This());
-//     _ = @import("Random/test.zig");
+// // test {
+// //     std.testing.refAllDecls(@This());
+// //     _ = @import("Random/test.zig");
+// // }
+
+// test "is_struct" {
+//     const MyStruct = struct {
+//         field: u32,
+//     };
+//     try testing.expect(!hasFn(MyStruct, "deinit"));
+//     try testing.expect(!hasFn(u32, "deinit"));
+//     try testing.expect(!hasFn([]const u8, "deinit"));
+//     try testing.expect(!hasFn(*u32, "deinit"));
 // }
