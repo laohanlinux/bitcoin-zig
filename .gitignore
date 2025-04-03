@@ -35,3 +35,4 @@
 .idea
 .zig-cache
 zig-cache
+zig-out
