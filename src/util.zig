@@ -1,4 +1,5 @@
 const std = @import("std");
+<<<<<<< HEAD
 
 test "print_type" {
     const MAX_VEC_SIZE: usize = 4_000_000;
@@ -8,3 +9,5 @@ test "print_type" {
     try writer.writeInt(u32, MAX_VEC_SIZE, .little);
     std.debug.print("buf: {any}\n", .{buf.toOwnedSlice() catch unreachable});
 }
+=======
+>>>>>>> main
