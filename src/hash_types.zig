@@ -1,6 +1,6 @@
 const std = @import("std");
 const hashes = @import("hashes/hash_engine.zig");
-const hex = @import("hashes/hash_engine.zig").hex;
+const hex = hashes.hex;
 
 pub const BlockHeader = struct {
     /// The protocol version. Should always be 1.
@@ -14,10 +14,21 @@ pub const Hash256 = struct {
         return .{ .h = hashes.HashEngine(hashes.HashType.sha256d).init(.{}) };
     }
 
+    pub fn initWithBuff(buf: [32]u8) @This() {
+        var h256: @This() = .{ .h = hashes.HashEngine(hashes.HashType.sha256d).init(.{}) };
+        std.mem.copyForwards(u8, h256.buf[0..], buf[0..]);
+        return h256;
+    }
+
     pub fn to_string(self: *@This(), allocator: std.mem.Allocator) ![]const u8 {
         return hex(allocator, self.buf);
     }
 
+    pub fn toOwned(self: @This()) [32]u8 {
+        return self.buf;
+    }
+
+    /// other interface implement.
     pub fn engine() hashes.HashEngine(hashes.HashType.sha256d) {
         return hashes.HashEngine(hashes.HashType.sha256d).init();
     }
