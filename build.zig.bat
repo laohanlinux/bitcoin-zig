@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }) },
-        .{ .name = "hashEngine", .m = std.Build.Module.create(b, .{
+        .{ .name = "hash", .m = std.Build.Module.create(b, .{
             .root_source_file = b.path("src/hashes/hash_engine.zig"),
             .target = target,
             .optimize = optimize,
@@ -156,9 +156,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         });
         // 如果 encode.zig 需要 hash 模块，也添加进来
-        for (libMods) |mod| {
-            encode_tests.root_module.addImport(mod.name, mod.m);
-        }
+        // encode_tests.root_module.addImport("hash", hash_mod);
 
         const run_encode_tests = b.addRunArtifact(encode_tests);
         // 将 encode 测试添加到测试步骤中
