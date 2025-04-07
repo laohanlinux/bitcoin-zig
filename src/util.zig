@@ -1,5 +1,20 @@
 const std = @import("std");
-<<<<<<< HEAD
+
+/// Check if a type has a function with the given name.
+pub fn hasFn(comptime a: type, fn_name: []const u8) bool {
+    const T = @TypeOf(a);
+    switch (@typeInfo(T)) {
+        .@"struct" => |info| {
+            inline for (info.fields) |field| {
+                if (std.mem.eql(u8, field.name, fn_name)) {
+                    return true;
+                }
+            }
+            return false;
+        },
+        else => return false,
+    }
+}
 
 test "print_type" {
     const MAX_VEC_SIZE: usize = 4_000_000;
@@ -9,5 +24,3 @@ test "print_type" {
     try writer.writeInt(u32, MAX_VEC_SIZE, .little);
     std.debug.print("buf: {any}\n", .{buf.toOwnedSlice() catch unreachable});
 }
-=======
->>>>>>> main

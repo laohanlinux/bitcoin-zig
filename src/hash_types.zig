@@ -1,17 +1,36 @@
 const std = @import("std");
 const hashes = @import("hashes/hash_engine.zig");
 const hex = hashes.hex;
+const util = @import("util.zig").hasFn;
 
 pub const BlockHeader = struct {
     /// The protocol version. Should always be 1.
     version: i32,
 };
 
+pub fn HashTrait(comptime hash_type: hashes.HashType) type {
+    // check if hash_type is valid
+    _ = hashes.HashEngine(hash_type).init(.{});
+    return struct {
+        buf: [hash_type.digest_size]u8 = [1]u8{0} ** hash_type.digest_size,
+        h: hashes.HashEngine(hash_type),
+
+        pub fn init() @This() {
+            return .{ .h = hashes.HashEngine(hash_type).init(.{}) };
+        }
+
+        pub fn engine() hashes.HashEngine(hash_type) {
+            return hashes.HashEngine(hash_type).init(.{});
+        }
+    };
+}
+
 pub const Hash256D = struct {
     buf: [32]u8 = [1]u8{0} ** 32,
     h: hashes.HashEngine(hashes.HashType.sha256d),
+
     pub fn init() @This() {
-        return .{ .h = hashes.HashEngine(hashes.HashType.sha256d).init(.{}) };
+        return .{ .h = hashes.HashEngine(.sha256d).init(.{}) };
     }
 
     pub fn initWithBuff(buf: [32]u8) @This() {
@@ -20,7 +39,7 @@ pub const Hash256D = struct {
         return h256;
     }
 
-    pub fn to_string(self: *@This(), allocator: std.mem.Allocator) ![]const u8 {
+    pub fn toString(self: *@This(), allocator: std.mem.Allocator) ![]const u8 {
         return hex(allocator, self.buf);
     }
 
@@ -35,14 +54,28 @@ pub const Hash256D = struct {
         return self.buf;
     }
 
-    pub fn engine() hashes.HashEngine(hashes.HashType.sha256d) {
-        return hashes.HashEngine(hashes.HashType.sha256d).init(.{});
+    pub fn engine() hashes.HashEngine(.sha256d) {
+        return hashes.HashEngine(.sha256d).init(.{});
     }
 };
 
+/// A 160-bit hash.
 pub const Hash160 = struct {
-    buf: [16]u8 = [1]u8{0} ** 16,
-    h: hashes.HashEngine(hashes.HashType.sha256),
+    buf: [20]u8 = [1]u8{0} ** 20,
+    h: hashes.HashEngine(.ripemd160),
+
+    pub fn init() @This() {
+        return .{ .h = hashes.HashEngine(.ripemd160).init(.{}) };
+    }
+
+    pub fn fromHash(hash: [20]u8) @This() {
+        return .{ .h = hashes.HashEngine(.ripemd160).init(.{}), .buf = hash };
+    }
+
+    /// other interface implement.
+    pub fn engine() hashes.HashEngine(.ripemd160) {
+        return hashes.HashEngine(.ripemd160).init(.{});
+    }
 };
 
 /// A bitcoin transaction hash/transaction ID.

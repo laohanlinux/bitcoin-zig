@@ -289,17 +289,14 @@ fn writeScriptInt(out: []u8, n: i64) u32 {
 }
 
 pub const Script = struct {
-    const Self = @This();
     vec: std.ArrayList(u8),
-    allocator: std.mem.Allocator,
+    const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         const vec = std.ArrayList(u8).init(allocator);
-        return .{ .vec = vec, .allocator = allocator };
-    }
-
-    pub fn default(allocator: std.mem.Allocator) Self {
-        return .{ .vec = std.ArrayList(u8).init(allocator), .allocator = allocator };
+        return .{
+            .vec = vec,
+        };
     }
 
     pub fn deinit(self: Self) void {
@@ -312,23 +309,23 @@ pub const Script = struct {
     }
 
     /// Whether the script is the empty script
-    pub fn is_empty(self: *const Self) bool {
+    pub fn isEmpty(self: *const Self) bool {
         return self.vec.items.len == 0;
     }
     /// Returns the script data
-    pub fn as_bytes(self: *const Self) []const u8 {
+    pub fn asBytes(self: *const Self) []const u8 {
         return self.vec.items;
     }
 
     /// Returns a copy of the script data
-    pub fn to_bytes(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
+    pub fn toBytes(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
         const bytes = try allocator.alloc(u8, self.vec.items.len);
         @memcpy(bytes, self.vec.items);
         return bytes;
     }
 
     /// Convert the script into a byte vector
-    pub fn into_bytes(self: Self) struct {
+    pub fn intoBytes(self: Self) struct {
         bytes: []u8,
         allocator: std.mem.Allocator,
     } {
@@ -336,7 +333,7 @@ pub const Script = struct {
     }
 
     /// Convert the script into a string representation of the value
-    pub fn value_string(self: *Self, vch: []const u8) []const u8 {
+    pub fn valueString(self: *Self, vch: []const u8) []const u8 {
         if (vch.len <= 4) {
             const num = std.big.Int.fromSlice(std.big.IntSignedness.Signed, vch, std.big.LittleEndian, .{});
             return num.toStr();
@@ -345,7 +342,7 @@ pub const Script = struct {
         return "";
     }
 
-    pub fn put_int(self: *Self, i: i64) void {
+    pub fn putInt(self: *Self, i: i64) void {
         _ = i;
         _ = self;
     }
@@ -355,7 +352,7 @@ pub const Script = struct {
     //     // const data_len = data.len;
     // }
 
-    pub fn put_code(self: *Self, code: OpCodeType) void {
+    pub fn putCode(self: *Self, code: OpCodeType) void {
         self.vec.append(code.to_u8());
     }
 
@@ -393,6 +390,8 @@ pub const Script = struct {
     //     };
     //     return len + _len;
     // }
+    //
+
 };
 
 pub const ScriptBuilder = struct {
@@ -408,20 +407,20 @@ pub const ScriptBuilder = struct {
         self.script.deinit();
     }
 
-    pub fn push_int(self: *Self, i: i64) void {
-        self.script.put_int(i);
+    pub fn pushInt(self: *Self, i: i64) void {
+        self.script.putInt(i);
     }
 
     pub fn len(self: *Self) u32 {
         return self.script.vec.items.len();
     }
 
-    pub fn is_empty(self: *Self) bool {
+    pub fn isEmpty(self: *Self) bool {
         return self.len() == 0;
     }
 
-    pub fn push_opcode(self: *Self, opCode: OpCodeType) void {
-        self.script.put_code(opCode);
+    pub fn pushOpcode(self: *Self, opCode: OpCodeType) void {
+        self.script.putCode(opCode);
         self.opCode.? = opCode;
     }
 };
@@ -440,7 +439,7 @@ const Push = union(enum) {
 
     const Self = @This();
 
-    pub fn to_string(self: Self) []const u8 {
+    pub fn toString(self: Self) []const u8 {
         switch (self) {
             .data => return "the data type",
             .num => return "the num type",

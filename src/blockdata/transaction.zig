@@ -124,10 +124,10 @@ pub const Transaction = struct {
 //
 pub const TxIn = struct {
     /// The reference to the previous output that is being used an an input
-    prev_out: OutPoint,
+    previousOutput: OutPoint,
     /// The script which pushes values on the stack which will cause
     /// the referenced output's script to accept
-    script_sig: Script,
+    scriptSig: Script,
     /// The sequence number, which suggests to miners which of two
     /// conflicting transactions should be preferred, or 0xFFFFFFFF
     /// to ignore this feature. This is generally never used since
@@ -142,7 +142,7 @@ pub const TxIn = struct {
     const Self = @This();
 
     pub fn init(prev_out: OutPoint, script_sig: Script, sequence: isize) Self {
-        return .{ .prev_out = prev_out, .script_sig = script_sig, .sequence = sequence };
+        return .{ .previousOutput = prev_out, .scriptSig = script_sig, .sequence = sequence };
     }
 
     pub fn consensusEncode(_: *const @This(), _: anytype) ![]u8 {
@@ -213,8 +213,17 @@ pub const OutPoint = struct {
     /// any previous outputs.
     pub const Null = Self.init(Txid.init(), std.math.maxInt(u32));
 
+    /// create a new [OutPoint]
     pub fn init(txid: Txid, vout: u32) Self {
         return .{ .txid = txid, .vout = vout };
+    }
+
+    /// Creates a "null" `OutPoint`
+    ///
+    /// This value is used for coinbase transactions because they don't have
+    /// any previous outputs.
+    pub fn nullOutPint() Self {
+        return Self.init(Txid.init(), std.math.maxInt(u32));
     }
 
     pub inline fn is_null(self: *Self) bool {
@@ -227,7 +236,44 @@ pub const OutPoint = struct {
         const str = try std.fmt.allocPrint(allocator, "OutPoint({s}, {d})", .{ str_hash, self.vout });
         return str;
     }
+
+    pub fn fromString(str: []const u8) ParseOutPointError!Self {
+        if (str.len > 75) { // 64 + 1 + 10
+            return .TooLong;
+        }
+        @panic("unambiguously");
+    }
+
+    pub fn consensusEncode(self: *const Self, writer: anytype) encode.Error!usize {
+        const txLen = try encode.Encodable(Txid).init(self.txid).consensusEncode(writer);
+        const voutLen = try encode.Encodable(u32).init(self.vout).consensusEncode(writer);
+        return txLen + voutLen;
+    }
 };
+
+/// An error in parsing an OutPoint
+pub const ParseOutPointError = error{
+    /// Error in TXID part.
+    Txid,
+    /// Error in vout part.
+    Vout,
+    /// Error in general format.
+    Format,
+    /// Size exceeds max.
+    TooLong,
+    /// Vout part is not strictly numeric without leading zeroes.
+    VoutNotCanonical,
+};
+
+pub fn parseOutPointErrorString(allocator: std.mem.Allocator, parseOutPointError: ParseOutPointError) []const u8 {
+    switch (parseOutPointError) {
+        .Txid => return std.fmt.allocPrint(allocator, "error parsing TXID", .{}) catch unreachable,
+        .Vout => return std.fmt.allocPrint(allocator, "error parsing vout", .{}) catch unreachable,
+        .Format => return std.fmt.allocPrint(allocator, "OutPoint not in <txid>:<vout> format", .{}) catch unreachable,
+        .TooLong => return std.fmt.allocPrint(allocator, "vout should be at most 10 digits", .{}) catch unreachable,
+        .VoutNotCanonical => return std.fmt.allocPrint(allocator, "no leading zeroes or + allowed in vout part", .{}) catch unreachable,
+    }
+}
 
 test "bigint" {
     const Managed = std.math.big.int.Managed;
