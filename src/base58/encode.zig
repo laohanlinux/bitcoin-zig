@@ -1,8 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
-const Alphabet = @import("./alphabet.zig").Alphabet;
+const Alphabet = @import("alphabet.zig").Alphabet;
 
-const EncoderError = error{ DestBuffTooSmall, BufResizeFailed, OutOfMemory };
+pub const EncoderError = error{ DestBuffTooSmall, BufResizeFailed, OutOfMemory };
 
 pub const Encoder = struct {
     alpha: Alphabet,

@@ -1,4 +1,6 @@
 const std = @import("std");
+pub const constants = @import("constants.zig");
+pub const address = @import("address.zig");
 
 // Network error
 pub const Error = error{

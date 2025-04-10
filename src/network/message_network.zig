@@ -1,4 +1,6 @@
 const std = @import("std");
+const constants = @import("constants.zig");
+const Address = @import("address.zig").Address;
 
 /// The `version` message
 pub const VersionMessage = struct {
@@ -25,7 +27,7 @@ pub const VersionMessage = struct {
 
     /// Constructs a new `version` message with `relay` set to false
     pub fn new(
-        services: ServiceFlags,
+        services: ServiceFlag,
         timestamp: i64,
         receiver: Address,
         sender: Address,

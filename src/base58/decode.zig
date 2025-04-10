@@ -1,5 +1,5 @@
 const std = @import("std");
-const Alphabet = @import("./alphabet.zig").Alphabet;
+const Alphabet = @import("alphabet.zig").Alphabet;
 
 pub const DecoderError = error{
     NonAsciiCharacter,
@@ -28,6 +28,7 @@ pub const Decoder = struct {
     /// to write into. It may also realloc as needed. Returned value is proper size.
     pub fn decodeAlloc(self: *const Self, allocator: std.mem.Allocator, encoded: []const u8) ![]u8 {
         var dest = try allocator.alloc(u8, encoded.len);
+        errdefer allocator.free(dest);
         const size = try decodeInteral(self.alpha, encoded, dest);
         if (dest.len != size) {
             dest = try allocator.realloc(dest, size);

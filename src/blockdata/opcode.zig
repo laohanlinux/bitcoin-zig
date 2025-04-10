@@ -384,6 +384,15 @@ pub const all = struct {
     pub const OP_RETURN_255 = All{ .code = 0xff };
 };
 
+/// Empty stack is also FALSE
+pub const OP_FALSE: All = all.OP_PUSHBYTES_0;
+/// Number 1 is also TRUE
+pub const OP_TRUE: All = all.OP_PUSHNUM_1;
+/// previously called OP_NOP2
+pub const OP_NOP2: All = all.OP_CLTV;
+/// previously called OP_NOP3
+pub const OP_NOP3: All = all.OP_CSV;
+
 /// Categorizes opcodes by their behavior
 pub const Class = union(enum) {
     /// Push a number onto the stack

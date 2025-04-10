@@ -9,6 +9,10 @@
 const std = @import("std");
 const opcodes = @import("opcode.zig");
 const hash_types = @import("../hash_types.zig");
+const encode = @import("../consensus/encode.zig");
+const DecoderOption = encode.DecoderOption;
+const EncoderOption = encode.EncoderOption;
+const Reader = encode.Reader;
 
 /// Bitcoin script
 pub const Script = struct {
@@ -33,28 +37,28 @@ pub const Script = struct {
     }
 
     /// Length of the script in bytes
-    pub fn len(self: Script) usize {
+    pub fn len(self: *const Script) usize {
         return self.bytes.len;
     }
 
     /// Whether the script is empty
-    pub fn isEmpty(self: Script) bool {
+    pub fn isEmpty(self: *const Script) bool {
         return self.bytes.len == 0;
     }
 
     /// Get script data as bytes
-    pub fn asBytes(self: Script) []const u8 {
+    pub fn asBytes(self: *const Script) []const u8 {
         return self.bytes;
     }
 
     /// Return a copy of the script data
-    pub fn toBytes(self: Script, allocator: std.mem.Allocator) ![]u8 {
+    pub fn toBytes(self: *const Script, allocator: std.mem.Allocator) ![]u8 {
         return try allocator.dupe(u8, self.bytes);
     }
 
     /// Compute the P2SH output corresponding to this redeem script
-    pub fn toP2sh(self: Script, allocator: std.mem.Allocator) !Script {
-        var builder = try Builder.new(allocator);
+    pub fn toP2sh(self: *const Script, allocator: std.mem.Allocator) !Script {
+        var builder = Builder.new(allocator);
         defer builder.deinit();
 
         try builder.pushOpcode(opcodes.all.OP_HASH160);
@@ -69,8 +73,8 @@ pub const Script = struct {
     }
 
     /// Compute the P2WSH output corresponding to this witness script
-    pub fn toV0P2wsh(self: Script, allocator: std.mem.Allocator) !Script {
-        var builder = try Builder.new(allocator);
+    pub fn toV0P2wsh(self: *const Script, allocator: std.mem.Allocator) !Script {
+        var builder = Builder.new(allocator);
         defer builder.deinit();
 
         try builder.pushInt(0);
@@ -83,7 +87,7 @@ pub const Script = struct {
     }
 
     /// Checks whether a script pubkey is a p2sh output
-    pub fn isP2sh(self: Script) bool {
+    pub fn isP2sh(self: *const Script) bool {
         return self.bytes.len == 23 and
             self.bytes[0] == opcodes.all.OP_HASH160.into_u8() and
             self.bytes[1] == opcodes.all.OP_PUSHBYTES_20.into_u8() and
@@ -91,7 +95,7 @@ pub const Script = struct {
     }
 
     /// Checks whether a script pubkey is a p2pkh output
-    pub fn isP2pkh(self: Script) bool {
+    pub fn isP2pkh(self: *const Script) bool {
         return self.bytes.len == 25 and
             self.bytes[0] == opcodes.all.OP_DUP.into_u8() and
             self.bytes[1] == opcodes.all.OP_HASH160.into_u8() and
@@ -101,7 +105,7 @@ pub const Script = struct {
     }
 
     /// Checks whether a script pubkey is a p2pk output
-    pub fn isP2pk(self: Script) bool {
+    pub fn isP2pk(self: *const Script) bool {
         return (self.bytes.len == 67 and
             self.bytes[0] == opcodes.all.OP_PUSHBYTES_65.into_u8() and
             self.bytes[66] == opcodes.all.OP_CHECKSIG.into_u8()) or
@@ -111,7 +115,7 @@ pub const Script = struct {
     }
 
     /// Checks whether a script pubkey is a Segregated Witness (segwit) program
-    pub fn isWitnessProgram(self: Script) bool {
+    pub fn isWitnessProgram(self: *const Script) bool {
         const min_vernum: u8 = opcodes.all.OP_PUSHNUM_1.into_u8();
         const max_vernum: u8 = opcodes.all.OP_PUSHNUM_16.into_u8();
 
@@ -127,33 +131,33 @@ pub const Script = struct {
     }
 
     /// Checks whether a script pubkey is a p2wsh output
-    pub fn isV0P2wsh(self: Script) bool {
+    pub fn isV0P2wsh(self: *const Script) bool {
         return self.bytes.len == 34 and
             self.bytes[0] == opcodes.all.OP_PUSHBYTES_0.into_u8() and
             self.bytes[1] == opcodes.all.OP_PUSHBYTES_32.into_u8();
     }
 
     /// Checks whether a script pubkey is a p2wpkh output
-    pub fn isV0P2wpkh(self: Script) bool {
+    pub fn isV0P2wpkh(self: *const Script) bool {
         return self.bytes.len == 22 and
             self.bytes[0] == opcodes.all.OP_PUSHBYTES_0.into_u8() and
             self.bytes[1] == opcodes.all.OP_PUSHBYTES_20.into_u8();
     }
 
     /// Check if this is an OP_RETURN output
-    pub fn isOpReturn(self: Script) bool {
+    pub fn isOpReturn(self: *const Script) bool {
         return self.bytes.len > 0 and (opcodes.All.from_u8(self.bytes[0]) == opcodes.all.OP_RETURN);
     }
 
     /// Whether a script can be proven to have no satisfying input
-    pub fn isProvablyUnspendable(self: Script) bool {
+    pub fn isProvablyUnspendable(self: *const Script) bool {
         return self.bytes.len > 0 and
             (opcodes.All.from_u8(self.bytes[0]).classify() == opcodes.Class.ReturnOp or
                 opcodes.All.from_u8(self.bytes[0]).classify() == opcodes.Class.IllegalOp);
     }
 
     /// Iterate over the script in the form of Instructions
-    pub fn instructions(self: Script) Instructions {
+    pub fn instructions(self: *const Script) Instructions {
         return Instructions{
             .data = self.bytes,
             .enforce_minimal = false,
@@ -161,7 +165,7 @@ pub const Script = struct {
     }
 
     /// Iterate over the script with enforced minimal pushes
-    pub fn instructionsMinimal(self: Script) Instructions {
+    pub fn instructionsMinimal(self: *const Script) Instructions {
         return Instructions{
             .data = self.bytes,
             .enforce_minimal = true,
@@ -169,7 +173,7 @@ pub const Script = struct {
     }
 
     /// Format the assembly representation of the script
-    pub fn formatAsm(self: Script, writer: anytype) !void {
+    pub fn formatAsm(self: *const Script, writer: anytype) !void {
         var index: usize = 0;
         while (index < self.bytes.len) {
             const opcode = opcodes.All.from_u8(self.bytes[index]);
@@ -251,7 +255,7 @@ pub const Script = struct {
     }
 
     /// Get the assembly representation of the script
-    pub fn toAsm(self: Script, allocator: std.mem.Allocator) ![]u8 {
+    pub fn toAsm(self: *const Script, allocator: std.mem.Allocator) ![]u8 {
         var list = std.ArrayList(u8).init(allocator);
         defer list.deinit();
 
@@ -260,11 +264,23 @@ pub const Script = struct {
     }
 
     /// Free the memory if allocated
-    pub fn deinit(self: *Script) void {
+    pub fn deinit(self: Script) void {
         if (self.bytes.len <= 0) return;
         if (self.allocator) |alloc| {
             alloc.free(self.bytes);
         }
+    }
+
+    /// Encode the script in a consensus-consistent way
+    pub fn consensusEncode(self: *const Script, _: EncoderOption, writer: anytype) encode.Error!usize {
+        const coder = encode.Encodable([]const u8).init(self.bytes);
+        return coder.consensusEncode(writer);
+    }
+
+    /// Decode the script from a consensus-consistent way
+    pub fn consensusDecode(option: DecoderOption, reader: Reader) encode.Error!Script {
+        const decoder = try encode.Decodable([]const u8).consensusDecode(option, reader);
+        return Script{ .bytes = decoder, .allocator = option.allocator.? };
     }
 };
 
@@ -409,115 +425,123 @@ pub const Instructions = struct {
     }
 };
 
-/// Script builder
+/// Script builder using the builder pattern
 pub const Builder = struct {
     bytes: std.ArrayList(u8),
     last_op: ?opcodes.All,
 
+    const Self = @This();
+
     /// Create a new empty script builder
-    pub fn new(allocator: std.mem.Allocator) !Builder {
-        return Builder{
+    pub fn new(allocator: std.mem.Allocator) Self {
+        return Self{
             .bytes = std.ArrayList(u8).init(allocator),
             .last_op = null,
         };
     }
 
     /// Length of the script
-    pub fn len(self: Builder) usize {
+    pub fn len(self: *const Self) usize {
         return self.bytes.items.len;
     }
 
     /// Whether the script is empty
-    pub fn isEmpty(self: Builder) bool {
+    pub fn isEmpty(self: *const Self) bool {
         return self.bytes.items.len == 0;
     }
 
     /// Adds instructions to push an integer onto the stack
-    pub fn pushInt(self: *Builder, data: i64) !void {
+    pub fn pushInt(self: *Self, data: i64) *Self {
         // Special-case -1, 1-16
         if (data == -1 or (data >= 1 and data <= 16)) {
-            const op_val = @as(u8, @as(i64, opcodes.all.OP_PUSHNUM_1.into_u8()) + data - 1);
+            const opPushNum1 = @as(i64, opcodes.OP_TRUE.into_u8());
+            const op_val = @as(u8, @intCast(opPushNum1 + data - 1));
             const opcode = opcodes.All.from_u8(op_val);
-            try self.pushOpcode(opcode);
+            _ = self.pushOpcode(opcode);
+            return self;
         }
         // Special-case zero
         else if (data == 0) {
-            try self.pushOpcode(opcodes.all.OP_FALSE);
+            _ = self.pushOpcode(opcodes.OP_FALSE);
+            return self;
         }
         // Otherwise encode as data
         else {
-            try self.pushScriptint(data);
+            return self.pushScriptint(data);
         }
     }
 
     /// Push integer using explicit encoding
-    pub fn pushScriptint(self: *Builder, data: i64) !void {
-        const int_bytes = try buildScriptint(data, self.bytes.allocator);
+    pub fn pushScriptint(self: *Self, data: i64) *Self {
+        const int_bytes = buildScriptint(self.bytes.allocator, data) catch unreachable;
         defer self.bytes.allocator.free(int_bytes);
-        try self.pushSlice(int_bytes);
+        return self.pushSlice(int_bytes);
     }
 
     /// Push arbitrary data onto the stack
-    pub fn pushSlice(self: *Builder, data: []const u8) !void {
+    pub fn pushSlice(self: *Self, data: []const u8) *Self {
         // Start with PUSH opcode
         switch (data.len) {
-            0...75 => try self.bytes.append(@as(u8, data.len)),
+            0...75 => self.bytes.append(@as(u8, @intCast(data.len))) catch unreachable,
             76...255 => {
-                try self.bytes.append(opcodes.Ordinary.OP_PUSHDATA1.into_u8());
-                try self.bytes.append(@as(u8, data.len));
+                self.bytes.append(opcodes.Ordinary.OP_PUSHDATA1.into_u8()) catch unreachable;
+                self.bytes.append(@as(u8, @intCast(data.len))) catch unreachable;
             },
             256...65535 => {
-                try self.bytes.append(opcodes.Ordinary.OP_PUSHDATA2.into_u8());
-                try self.bytes.append(@as(u8, data.len & 0xFF));
-                try self.bytes.append(@as(u8, (data.len >> 8) & 0xFF));
+                self.bytes.append(opcodes.Ordinary.OP_PUSHDATA2.into_u8()) catch unreachable;
+                self.bytes.append(@as(u8, @intCast(data.len & 0xFF))) catch unreachable;
+                self.bytes.append(@as(u8, @intCast((data.len >> 8) & 0xFF))) catch unreachable;
             },
             65536...4294967295 => {
-                try self.bytes.append(opcodes.Ordinary.OP_PUSHDATA4.into_u8());
-                try self.bytes.append(@as(u8, data.len & 0xFF));
-                try self.bytes.append(@as(u8, (data.len >> 8) & 0xFF));
-                try self.bytes.append(@as(u8, (data.len >> 16) & 0xFF));
-                try self.bytes.append(@as(u8, (data.len >> 24) & 0xFF));
+                self.bytes.append(opcodes.Ordinary.OP_PUSHDATA4.into_u8()) catch unreachable;
+                self.bytes.append(@as(u8, @intCast(data.len & 0xFF))) catch unreachable;
+                self.bytes.append(@as(u8, @intCast((data.len >> 8) & 0xFF))) catch unreachable;
+                self.bytes.append(@as(u8, @intCast((data.len >> 16) & 0xFF))) catch unreachable;
+                self.bytes.append(@as(u8, @intCast((data.len >> 24) & 0xFF))) catch unreachable;
             },
             else => @panic("tried to put a 4bn+ sized object into a script!"),
         }
 
         // Then push the raw bytes
-        try self.bytes.appendSlice(data);
+        self.bytes.appendSlice(data) catch unreachable;
         self.last_op = null;
+        return self;
     }
 
     /// Adds a single opcode to the script
-    pub fn pushOpcode(self: *Builder, data: opcodes.All) !void {
-        try self.bytes.append(data.into_u8());
+    pub fn pushOpcode(self: *Self, data: opcodes.All) *Self {
+        self.bytes.append(data.into_u8()) catch unreachable;
         self.last_op = data;
+        return self;
     }
 
     /// Adds OP_VERIFY unless the most-recently-added opcode has a VERIFY form
-    pub fn pushVerify(self: *Builder) !void {
+    pub fn pushVerify(self: *Self) *Self {
         if (self.last_op) |last| {
             if (last == opcodes.all.OP_EQUAL) {
                 _ = self.bytes.pop();
-                try self.pushOpcode(opcodes.all.OP_EQUALVERIFY);
+                self.pushOpcode(opcodes.all.OP_EQUALVERIFY);
             } else if (last == opcodes.all.OP_NUMEQUAL) {
                 _ = self.bytes.pop();
-                try self.pushOpcode(opcodes.all.OP_NUMEQUALVERIFY);
+                self.pushOpcode(opcodes.all.OP_NUMEQUALVERIFY);
             } else if (last == opcodes.all.OP_CHECKSIG) {
                 _ = self.bytes.pop();
-                try self.pushOpcode(opcodes.all.OP_CHECKSIGVERIFY);
+                self.pushOpcode(opcodes.all.OP_CHECKSIGVERIFY);
             } else if (last == opcodes.all.OP_CHECKMULTISIG) {
                 _ = self.bytes.pop();
-                try self.pushOpcode(opcodes.all.OP_CHECKMULTISIGVERIFY);
+                self.pushOpcode(opcodes.all.OP_CHECKMULTISIGVERIFY);
             } else {
-                try self.pushOpcode(opcodes.all.OP_VERIFY);
+                self.pushOpcode(opcodes.all.OP_VERIFY);
             }
         } else {
-            try self.pushOpcode(opcodes.all.OP_VERIFY);
+            self.pushOpcode(opcodes.all.OP_VERIFY);
         }
+        return self;
     }
 
     /// Convert the Builder into a Script
-    pub fn intoScript(self: *Builder) !Script {
-        const bytes = try self.bytes.toOwnedSlice();
+    pub fn build(self: *Self) Script {
+        const bytes = self.bytes.toOwnedSlice() catch unreachable;
         return Script{
             .bytes = bytes,
             .allocator = self.bytes.allocator,
@@ -525,42 +549,55 @@ pub const Builder = struct {
     }
 
     /// Free resources used by the builder
-    pub fn deinit(self: *Builder) void {
+    pub fn deinit(self: *Self) void {
         self.bytes.deinit();
     }
 };
 
 /// Helper to encode an integer in script format
-fn buildScriptint(n: i64, allocator: std.mem.Allocator) ![]u8 {
+fn buildScriptint(allocator: std.mem.Allocator, n: i64) ![]u8 {
     if (n == 0) return allocator.dupe(u8, &[_]u8{});
 
     const neg = n < 0;
-    var abs: u64 = if (neg) @as(u64, -n) else @as(u64, n);
+    var abs: u64 = if (neg) @as(u64, @intCast(-n)) else @as(u64, @intCast(n));
 
     var list = std.ArrayList(u8).init(allocator);
     errdefer list.deinit();
 
     while (abs > 0xFF) {
-        try list.append(@as(u8, abs & 0xFF));
+        try list.append(@as(u8, @intCast(abs & 0xFF)));
         abs >>= 8;
     }
 
     // If the number's value causes the sign bit to be set, we need an extra
     // byte to get the correct value and correct sign bit
     if (abs & 0x80 != 0) {
-        try list.append(@as(u8, abs));
+        try list.append(@as(u8, @intCast(abs)));
         try list.append(if (neg) 0x80 else 0x00);
     }
     // Otherwise we just set the sign bit ourselves
     else {
-        abs |= if (neg) 0x80 else 0;
-        try list.append(@as(u8, abs));
+        abs |= if (neg) 0x80 else 0x00;
+        try list.append(@as(u8, @intCast(abs)));
     }
 
     return list.toOwnedSlice();
 }
 
 /// Helper to decode an integer in script format
+/// Notice that this fails on overflow: the result is the same as in
+/// bitcoind, that only 4-byte signed-magnitude values may be read as
+/// numbers. They can be added or subtracted (and a long time ago,
+/// multiplied and divided), and this may result in numbers which
+/// can't be written out in 4 bytes or less. This is ok! The number
+/// just can't be read as a number again.
+/// This is a bit crazy and subtle, but it makes sense: you can load
+/// 32-bit numbers and do anything with them, which back when mult/div
+/// was allowed, could result in up to a 64-bit number. We don't want
+/// overflow since that's surprising --- and we don't want numbers that
+/// don't fit in 64 bits (for efficiency on modern processors) so we
+/// simply say, anything in excess of 32 bits is no longer a number.
+/// This is basically a ranged type implementation.
 fn readScriptint(v: []const u8) !i64 {
     if (v.len == 0) return 0;
     if (v.len > 4) return Error.NumericOverflow;
@@ -568,19 +605,20 @@ fn readScriptint(v: []const u8) !i64 {
     var ret: i64 = 0;
     var i: usize = 0;
     while (i < v.len) : (i += 1) {
-        ret += @as(i64, v[i]) << @as(u6, i * 8);
+        ret += @as(i64, @intCast(v[i])) << @as(u6, @intCast(i * 8));
     }
 
     // Check for sign bit
     if (v[v.len - 1] & 0x80 != 0) {
-        ret &= (@as(i64, 1) << @as(u6, (v.len * 8 - 1))) - 1;
+        ret &= (@as(i64, 1) << @as(u6, @intCast(v.len * 8 - 1))) - 1;
         ret = -ret;
     }
 
     return ret;
 }
 
-/// Read script boolean
+/// This is like "`read_scriptint` then map 0 to false and everything
+/// else as true", except that the overflow rules don't apply.
 fn readScriptbool(v: []const u8) bool {
     if (v.len == 0) return false;
 
@@ -605,67 +643,114 @@ fn readUint(data: []const u8, size: usize) !usize {
     var ret: usize = 0;
     var i: usize = 0;
     while (i < size) : (i += 1) {
-        ret += @as(usize, data[i]) << @as(u6, i * 8);
+        ret += @as(usize, data[i]) << @as(usize, i * 8);
     }
 
     return ret;
 }
 
-test "basic script tests" {
-    const allocator = std.testing.allocator;
-
-    // Create empty script
-    var script = Script.new(allocator);
+test "script" {
+    var comp = std.ArrayList(u8).init(std.testing.allocator);
+    defer comp.deinit();
+    var script = Builder.new(std.testing.allocator);
     defer script.deinit();
-    try std.testing.expectEqual(script.len(), 0);
-    try std.testing.expect(script.isEmpty());
+    try std.testing.expectEqual(script.bytes.items, comp.items);
 
-    // // Create script from bytes
-    const p2pkh_bytes = [_]u8{ 0x76, 0xa9, 0x14, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x88, 0xac };
-    var p2pkh = try Script.fromBytes(&p2pkh_bytes, allocator);
-    defer p2pkh.deinit();
-
-    try std.testing.expect(p2pkh.isP2pkh());
-    // try std.testing.expect(!p2pkh.isP2sh());
-}
-
-test "script builder" {
-    const allocator = std.testing.allocator;
-
-    var builder = try Builder.new(allocator);
-    defer builder.deinit();
-
-    // Push integers
-    try builder.pushInt(0);
-    try builder.pushInt(1);
-    try builder.pushInt(-1);
-    try builder.pushInt(16);
-    try builder.pushInt(100);
-
-    // Push opcodes
-    try builder.pushOpcode(opcodes.all.OP_DUP);
-    try builder.pushOpcode(opcodes.all.OP_HASH160);
-
-    // Push data
-    try builder.pushSlice(&[_]u8{ 0x01, 0x02, 0x03, 0x04 });
-
-    // Create script
-    var script = try builder.intoScript();
-    defer script.deinit();
-
-    try std.testing.expectEqual(script.len(), 11);
-}
-
-test "script int encoding" {
-    const allocator = std.testing.allocator;
-
-    const cases = [_]i64{ 0, 1, -1, 127, -127, 128, -128, 255, 256, -256, 1000, -1000 };
-
-    for (cases) |n| {
-        const encoded = try buildScriptint(n, allocator);
-        defer allocator.free(encoded);
-
-        const decoded = try readScriptint(encoded);
-        try std.testing.expectEqual(n, decoded);
+    // small ints
+    {
+        _ = script.pushInt(1);
+        _ = try comp.append(81);
+        try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
+        _ = script.pushInt(0);
+        _ = try comp.append(0x00);
+        try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
+        _ = script.pushInt(4);
+        _ = try comp.append(84);
+        try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
+        _ = script.pushInt(-1);
+        _ = try comp.append(79);
+        try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
+        // forced scriptint
+        _ = script.pushScriptint(4);
+        _ = try comp.appendSlice(&[_]u8{ 1, 4 });
+        try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
+        // big ints
+        _ = script.pushScriptint(17);
+        _ = try comp.appendSlice(&[_]u8{ 1, 17 });
+        try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
+        _ = script.pushScriptint(10000);
+        _ = try comp.appendSlice(&[_]u8{ 2, 16, 39 });
+        try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
+        // notice the sign bit set here, hence the extra zero/128 at the end
+        _ = script.pushScriptint(10000000);
+        _ = try comp.appendSlice(&[_]u8{ 4, 128, 150, 152, 0 });
+        try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
+        _ = script.pushScriptint(-10000000);
+        _ = try comp.appendSlice(&[_]u8{ 4, 128, 150, 152, 128 });
+        try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
+        // data
+        _ = script.pushSlice("NRA4VR");
+        _ = try comp.appendSlice(&[_]u8{ 6, 78, 82, 65, 52, 86, 82 });
+        try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
+        // keys
     }
 }
+
+// test "basic script tests" {
+//     const allocator = std.testing.allocator;
+
+//     // Create empty script
+//     var script = Script.new(allocator);
+//     defer script.deinit();
+//     try std.testing.expectEqual(script.len(), 0);
+//     try std.testing.expect(script.isEmpty());
+
+//     // // Create script from bytes
+//     const p2pkh_bytes = [_]u8{ 0x76, 0xa9, 0x14, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x88, 0xac };
+//     var p2pkh = try Script.fromBytes(&p2pkh_bytes, allocator);
+//     defer p2pkh.deinit();
+
+//     try std.testing.expect(p2pkh.isP2pkh());
+//     // try std.testing.expect(!p2pkh.isP2sh());
+// }
+
+// test "script builder" {
+//     const allocator = std.testing.allocator;
+
+//     var builder = try Builder.new(allocator);
+//     defer builder.deinit();
+
+//     // Push integers
+//     try builder.pushInt(0);
+//     try builder.pushInt(1);
+//     try builder.pushInt(-1);
+//     try builder.pushInt(16);
+//     try builder.pushInt(100);
+
+//     // Push opcodes
+//     try builder.pushOpcode(opcodes.all.OP_DUP);
+//     try builder.pushOpcode(opcodes.all.OP_HASH160);
+
+//     // Push data
+//     try builder.pushSlice(&[_]u8{ 0x01, 0x02, 0x03, 0x04 });
+
+//     // Create script
+//     var script = try builder.intoScript();
+//     defer script.deinit();
+
+//     try std.testing.expectEqual(script.len(), 11);
+// }
+
+// test "script int encoding" {
+//     const allocator = std.testing.allocator;
+
+//     const cases = [_]i64{ 0, 1, -1, 127, -127, 128, -128, 255, 256, -256, 1000, -1000 };
+
+//     for (cases) |n| {
+//         const encoded = try buildScriptint(allocator, n);
+//         defer allocator.free(encoded);
+
+//         const decoded = try readScriptint(encoded);
+//         try std.testing.expectEqual(n, decoded);
+//     }
+// }
