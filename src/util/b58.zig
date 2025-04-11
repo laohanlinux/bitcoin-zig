@@ -1,20 +1,20 @@
-const sha256d = @import("hashEngine").HashEngine(.sha256d);
-const b58 = @import("base58");
+const sha256d = @import("hashes").engine.HashEngine(.sha256d);
+const base58 = @import("base58");
 const std = @import("std");
 
 pub const Error = error{
     TooShort,
     BadCheckSum,
-} || b58.EncoderError || b58.DecoderError;
+} || base58.EncoderError || base58.DecoderError;
 
-fn encode(allocator: std.mem.Allocator, source: []const u8) Error![]u8 {
-    var encoder = b58.Encoder.init(.{});
+pub fn encode(allocator: std.mem.Allocator, source: []const u8) Error![]u8 {
+    var encoder = base58.Encoder.init(.{});
     const encoded = encoder.encodeAlloc(allocator, source) catch unreachable;
     return encoded;
 }
 
-fn decode(allocator: std.mem.Allocator, encoded: []const u8) Error![]u8 {
-    var decoder = b58.Decoder.init(.{});
+pub fn decode(allocator: std.mem.Allocator, encoded: []const u8) Error![]u8 {
+    var decoder = base58.Decoder.init(.{});
     const decoded = try decoder.decodeAlloc(allocator, encoded);
     return decoded;
 }
@@ -39,7 +39,7 @@ pub fn checkEncodeSliceToFmt(allocator: std.mem.Allocator, slice: []const u8) Er
 /// Decode a base58check-encoded string
 /// Optimized for the case where the string is a valid base58check string
 pub fn fromCheck(allocator: std.mem.Allocator, encoded: []const u8) Error![]u8 {
-    var decoder = b58.Decoder.init(.{});
+    var decoder = base58.Decoder.init(.{});
     const decoded = try decoder.decodeAlloc(allocator, encoded);
     defer allocator.free(decoded);
     if (decoded.len < 4) {
@@ -105,7 +105,7 @@ test "test_base58_decode" {
     const addr = [_]u8{ 0, 248, 145, 115, 3, 191, 168, 239, 36, 242, 146, 232, 250, 20, 25, 178, 4, 96, 186, 6, 77 };
     try std.testing.expectEqualSlices(u8, try fromCheck(area.allocator(), "1PfJpZsjreyVrqeoAfabrRwwjQyoSQMmHH"), addr[0..]);
     // Non Base58 char.
-    try std.testing.expectError(b58.DecoderError.NonAsciiCharacter, fromCheck(area.allocator(), "¢"));
+    try std.testing.expectError(base58.DecoderError.NonAsciiCharacter, fromCheck(area.allocator(), "¢"));
 }
 
 test "test_base58_roundtrip" {

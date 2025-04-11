@@ -8,8 +8,8 @@
 
 const std = @import("std");
 const opcodes = @import("opcode.zig");
-const hash_types = @import("../hash_types.zig");
-const encode = @import("../consensus/encode.zig");
+const hash_types = @import("hashtypes");
+const encode = @import("consensus").encode;
 const DecoderOption = encode.DecoderOption;
 const EncoderOption = encode.EncoderOption;
 const Reader = encode.Reader;
@@ -58,7 +58,7 @@ pub const Script = struct {
 
     /// Compute the P2SH output corresponding to this redeem script
     pub fn toP2sh(self: *const Script, allocator: std.mem.Allocator) !Script {
-        var builder = Builder.new(allocator);
+        var builder = Builder.init(allocator);
         defer builder.deinit();
 
         try builder.pushOpcode(opcodes.all.OP_HASH160);
@@ -74,7 +74,7 @@ pub const Script = struct {
 
     /// Compute the P2WSH output corresponding to this witness script
     pub fn toV0P2wsh(self: *const Script, allocator: std.mem.Allocator) !Script {
-        var builder = Builder.new(allocator);
+        var builder = Builder.init(allocator);
         defer builder.deinit();
 
         try builder.pushInt(0);
@@ -433,7 +433,7 @@ pub const Builder = struct {
     const Self = @This();
 
     /// Create a new empty script builder
-    pub fn new(allocator: std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
             .bytes = std.ArrayList(u8).init(allocator),
             .last_op = null,
@@ -652,7 +652,7 @@ fn readUint(data: []const u8, size: usize) !usize {
 test "script" {
     var comp = std.ArrayList(u8).init(std.testing.allocator);
     defer comp.deinit();
-    var script = Builder.new(std.testing.allocator);
+    var script = Builder.init(std.testing.allocator);
     defer script.deinit();
     try std.testing.expectEqual(script.bytes.items, comp.items);
 

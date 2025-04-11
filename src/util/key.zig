@@ -34,6 +34,14 @@ pub const PublicKey = struct {
         return buf.toOwnedSlice();
     }
 
+    pub fn asBytes(self: *const Self) ![]u8 {
+        if (self.compressed) {
+            return self.key.toCompressedSec1()[0..1];
+        } else {
+            return self.key.toUncompressedSec1()[0..];
+        }
+    }
+
     /// Deserialize a public key from a slice
     pub fn fromSlice(bytes: []const u8) Error!PublicKey {
         const compressed = switch (bytes.len) {
@@ -132,4 +140,5 @@ test "private key" {
     try std.testing.expectEqualSlices(u8, toWif, "cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy");
     // const publicKeyBytes = try publicKey.toBytes(area.allocator());
     // try std.testing.expectEqualSlices(u8, publicKeyBytes, "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798");
+    std.debug.print("private key: {any}\n", .{Network.bitcoin});
 }

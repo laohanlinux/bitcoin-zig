@@ -18,8 +18,8 @@ const mem = std.mem;
 const math = std.math;
 const testing = std.testing;
 
-const hash = @import("../hashes/hash_engine.zig");
-const hex = hash.hex;
+const hashEngine = @import("hashes").engine;
+const hex = hashEngine.hex;
 const hashType = @import("hashtypes");
 const TxId = hashType.Txid;
 

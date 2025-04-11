@@ -1,26 +1,27 @@
 const std = @import("std");
-const hashes = @import("hashes/hash_engine.zig");
-const hex = hashes.hex;
-const util = @import("util.zig").hasFn;
+const hashes = @import("hashes");
+const hashEngine = hashes.engine;
+const HashType = hashEngine.HashType;
+const hex = hashEngine.hex;
 
 pub const BlockHeader = struct {
     /// The protocol version. Should always be 1.
     version: i32,
 };
 
-pub fn HashTrait(comptime hash_type: hashes.HashType) type {
+pub fn HashTrait(comptime hash_type: HashType) type {
     // check if hash_type is valid
-    _ = hashes.HashEngine(hash_type).init(.{});
+    _ = hashEngine.HashEngine(hash_type).init(.{});
     return struct {
         buf: [hash_type.digest_size]u8 = [1]u8{0} ** hash_type.digest_size,
-        h: hashes.HashEngine(hash_type),
+        h: hashEngine.HashEngine(hash_type),
 
         pub fn init() @This() {
-            return .{ .h = hashes.HashEngine(hash_type).init(.{}) };
+            return .{ .h = hashEngine.HashEngine(hash_type).init(.{}) };
         }
 
-        pub fn engine() hashes.HashEngine(hash_type) {
-            return hashes.HashEngine(hash_type).init(.{});
+        pub fn engine() hashEngine.HashEngine(hash_type) {
+            return hashEngine.HashEngine(hash_type).init(.{});
         }
     };
 }

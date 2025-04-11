@@ -37,6 +37,16 @@ pub inline fn hex(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
     return hex_str;
 }
 
+/// Parse a hex string into a slice of bytes.
+pub inline fn parseHexBytes(allocator: std.mem.Allocator, hexStr: []const u8) []u8 {
+    var bytes = allocator.alloc(u8, hexStr.len / 2) catch unreachable;
+    var i: usize = 0;
+    while (i < hexStr.len) : (i += 2) {
+        bytes[i / 2] = std.fmt.parseInt(u8, hexStr[i .. i + 2], 16) catch unreachable;
+    }
+    return bytes;
+}
+
 /// A hashing engine which bytes can be serialized into. It is expected
 /// to implement the `io::Write` trait, but to never return errors under
 /// any conditions.

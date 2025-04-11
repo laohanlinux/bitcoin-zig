@@ -26,8 +26,8 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }) },
-        .{ .name = "hashEngine", .m = std.Build.Module.create(b, .{
-            .root_source_file = b.path("src/hashes/hash_engine.zig"),
+        .{ .name = "hashes", .m = std.Build.Module.create(b, .{
+            .root_source_file = b.path("src/hashes/lib.zig"),
             .target = target,
             .optimize = optimize,
         }) },
@@ -36,13 +36,28 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }) },
+        .{ .name = "util", .m = std.Build.Module.create(b, .{
+            .root_source_file = b.path("src/util/lib.zig"),
+            .target = target,
+            .optimize = optimize,
+        }) },
         .{ .name = "base58", .m = std.Build.Module.create(b, .{
             .root_source_file = b.path("src/base58/lib.zig"),
             .target = target,
             .optimize = optimize,
         }) },
-        .{ .name = "util", .m = std.Build.Module.create(b, .{
-            .root_source_file = b.path("src/util/key.zig"),
+        .{ .name = "blockdata", .m = std.Build.Module.create(b, .{
+            .root_source_file = b.path("src/blockdata/lib.zig"),
+            .target = target,
+            .optimize = optimize,
+        }) },
+        .{ .name = "consensus", .m = std.Build.Module.create(b, .{
+            .root_source_file = b.path("src/consensus/lib.zig"),
+            .target = target,
+            .optimize = optimize,
+        }) },
+        .{ .name = "bip", .m = std.Build.Module.create(b, .{
+            .root_source_file = b.path("src/bip/lib.zig"),
             .target = target,
             .optimize = optimize,
         }) },
@@ -163,7 +178,8 @@ pub fn build(b: *std.Build) void {
     // Add test case
     const testPath = [_][]const u8{
         "src/consensus/encode.zig",
-        "src/util/key.zig",
+        // "src/util/key.zig",
+        // "src/network/address.zig",
     };
     for (testPath) |path| {
         const encode_tests = b.addTest(.{

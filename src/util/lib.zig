@@ -1,4 +1,7 @@
 const std = @import("std");
+pub const key = @import("key.zig");
+pub const b58 = @import("b58.zig");
+pub const bech32 = @import("bech32.zig");
 
 /// Check if a type has a function with the given name.
 pub fn hasFn(comptime a: type, fn_name: []const u8) bool {
@@ -14,13 +17,4 @@ pub fn hasFn(comptime a: type, fn_name: []const u8) bool {
         },
         else => return false,
     }
-}
-
-test "print_type" {
-    const MAX_VEC_SIZE: usize = 4_000_000;
-    var buf = std.ArrayList(u8).init(std.testing.allocator);
-    defer buf.deinit();
-    var writer = buf.writer();
-    try writer.writeInt(u32, MAX_VEC_SIZE, .little);
-    std.debug.print("buf: {any}\n", .{buf.toOwnedSlice() catch unreachable});
 }
