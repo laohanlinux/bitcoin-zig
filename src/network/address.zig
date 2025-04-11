@@ -1,7 +1,7 @@
 // address.zig
 
 const std = @import("std");
-const blockdata = @import("blockdata");
+const blockdata = @import("bitcoin-zig").blockdata;
 const util = @import("util");
 const b58 = util.b58;
 const bech32 = util.bech32;
@@ -423,15 +423,19 @@ fn findBech32Prefix(bech32Str: []const u8) []const u8 {
     }
 }
 
+// test "address" {
+//     var area = std.heap.ArenaAllocator.init(std.testing.allocator);
+//     defer area.deinit();
+//     const payload = engine.parseHexBytes(area.allocator(), "162c5ea71c0b23f5b9022ef047c4a86470a5b070")[0..20];
+//     const address = Address{
+//         .allocator = area.allocator(),
+//         .network = .bitcoin,
+//         .payload = .{ .PubkeyHash = payload.* },
+//     };
+//     std.debug.print("address: {s}\n", .{try address.toString(area.allocator())});
+// }
+
 test "address" {
-    const engine = @import("hashes").engine;
-    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer area.deinit();
-    const payload = engine.parseHexBytes(area.allocator(), "162c5ea71c0b23f5b9022ef047c4a86470a5b070")[0..20];
-    const address = Address{
-        .allocator = area.allocator(),
-        .network = .bitcoin,
-        .payload = .{ .PubkeyHash = payload.* },
-    };
-    std.debug.print("address: {s}\n", .{try address.toString(area.allocator())});
+    const engine = @import("../base58/lib.zig");
+    std.debug.print("engine: {any}\n", .{engine});
 }
