@@ -1,5 +1,5 @@
 const std = @import("std");
-const Network = @import("network").constants.Network;
+const Network = @import("../network/lib.zig").constants.Network;
 
 const Allocator = std.mem.Allocator;
 const Secp256k1 = std.crypto.ecc.Secp256k1;

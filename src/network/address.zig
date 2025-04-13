@@ -1,11 +1,9 @@
-// address.zig
-
 const std = @import("std");
-const blockdata = @import("bitcoin-zig").blockdata;
-const util = @import("util");
+const blockdata = @import("../blockdata/lib.zig");
+const util = @import("../util/lib.zig");
 const b58 = util.b58;
 const bech32 = util.bech32;
-const hashTypes = @import("hashtypes");
+const hashTypes = @import("../hashtypes/lib.zig");
 const Script = blockdata.script.Script;
 const Builder = blockdata.script.Builder;
 const opcode = blockdata.opcode;
@@ -95,7 +93,7 @@ pub const Payload = union(enum) {
         switch (self.*) {
             .PubkeyHash => |hash| blk: {
                 var builder = Builder.init(allocator);
-                builder.pushOpcode(all.OP_DUP)
+                _ = builder.pushOpcode(all.OP_DUP)
                     .pushOpcode(all.OP_HASH160)
                     .pushSlice(&hash)
                     .pushOpcode(all.OP_EQUALVERIFY)
@@ -104,16 +102,17 @@ pub const Payload = union(enum) {
             },
             .ScriptHash => |hash| blk: {
                 var builder = Builder.init(allocator);
-                builder.pushOpcode(all.OP_HASH160)
+                _ = builder.pushOpcode(all.OP_HASH160)
                     .pushSlice(&hash)
                     .pushOpcode(all.OP_EQUAL);
                 break :blk builder.build();
             },
             .WitnessProgram => |wp| blk: {
-                const ver: u8 = @as(u8, @intCast(if (wp.version > 0) wp.version + 0x50 else 0));
+                const firstVersion = @as(u5, @intCast(80));
+                const ver: u8 = @as(u8, @intCast(if (wp.version > 0) wp.version + firstVersion else firstVersion));
                 std.debug.assert(ver <= 16);
                 var builder = Builder.init(allocator);
-                builder.pushOpcode(opcode.All.from_u8(ver))
+                _ = builder.pushOpcode(opcode.All.from_u8(ver))
                     .pushSlice(wp.program);
                 break :blk builder.build();
             },
@@ -423,19 +422,30 @@ fn findBech32Prefix(bech32Str: []const u8) []const u8 {
     }
 }
 
-// test "address" {
-//     var area = std.heap.ArenaAllocator.init(std.testing.allocator);
-//     defer area.deinit();
-//     const payload = engine.parseHexBytes(area.allocator(), "162c5ea71c0b23f5b9022ef047c4a86470a5b070")[0..20];
-//     const address = Address{
-//         .allocator = area.allocator(),
-//         .network = .bitcoin,
-//         .payload = .{ .PubkeyHash = payload.* },
-//     };
-//     std.debug.print("address: {s}\n", .{try address.toString(area.allocator())});
-// }
-
 test "address" {
-    const engine = @import("../base58/lib.zig");
-    std.debug.print("engine: {any}\n", .{engine});
+    const engine = @import("../hashes/lib.zig").engine;
+    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer area.deinit();
+    const payload = engine.parseHexBytes(area.allocator(), "162c5ea71c0b23f5b9022ef047c4a86470a5b070")[0..20];
+    const address = Address{
+        .allocator = area.allocator(),
+        .network = .bitcoin,
+        .payload = .{ .PubkeyHash = payload.* },
+    };
+    const pubkey = address.scriptPubKey(area.allocator());
+    std.debug.print("hex publickey: {s}", .{try engine.hex(area.allocator(), pubkey.asBytes())});
+    std.debug.print("address: {s}\n", .{try address.toString(area.allocator())});
+}
+
+test "p2ppkh address base58" {
+    const engine = @import("../hashes/lib.zig").engine;
+    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer area.deinit();
+    const payload = engine.parseHexBytes(area.allocator(), "162c5ea71c0b23f5b9022ef047c4a86470a5b070")[0..20];
+    const address = Address{
+        .allocator = area.allocator(),
+        .network = .bitcoin,
+        .payload = .{ .PubkeyHash = payload.* },
+    };
+    std.debug.print("address: {s}\n", .{try address.toString(area.allocator())});
 }

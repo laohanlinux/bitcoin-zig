@@ -85,6 +85,11 @@ pub fn HashEngine(h: HashType) type {
                     const _hash = Ripemd160.hash(input).bytes;
                     std.mem.copyForwards(u8, out, _hash[0..20]);
                 },
+                .sha256, .sha256d => {
+                    var hashEngine = Self.init(.{});
+                    hashEngine.update(input);
+                    hashEngine.finish(out);
+                },
                 else => @compileError("not implemented"),
             }
         }

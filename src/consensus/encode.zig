@@ -18,9 +18,9 @@ const mem = std.mem;
 const math = std.math;
 const testing = std.testing;
 
-const hashEngine = @import("hashes").engine;
+const hashEngine = @import("../hashes/lib.zig").engine;
 const hex = hashEngine.hex;
-const hashType = @import("hashtypes");
+const hashType = @import("../hashtypes/lib.zig");
 const TxId = hashType.Txid;
 
 pub const Reader = io.FixedBufferStream([]const u8).Reader;

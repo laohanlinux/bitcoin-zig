@@ -1,5 +1,5 @@
 const std = @import("std");
-const hash = @import("hashtypes");
+const hash = @import("../hashtypes/lib.zig");
 const transaction = @import("transaction.zig");
 const BlockHash = hash.BlockHash;
 const TxMerkleNode = hash.TxMerkleNode;

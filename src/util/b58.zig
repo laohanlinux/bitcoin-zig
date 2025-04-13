@@ -1,5 +1,5 @@
-const sha256d = @import("hashes").engine.HashEngine(.sha256d);
-const base58 = @import("base58");
+const sha256d = @import("../hashes/lib.zig").engine.HashEngine(.sha256d);
+const base58 = @import("../base58/lib.zig");
 const std = @import("std");
 
 pub const Error = error{
@@ -24,11 +24,7 @@ pub fn decode(allocator: std.mem.Allocator, encoded: []const u8) Error![]u8 {
 /// TODO Optimize this
 pub fn checkEncodeSliceToFmt(allocator: std.mem.Allocator, slice: []const u8) Error![]u8 {
     var outer: [32]u8 = undefined;
-    {
-        var hasher = sha256d.init(.{});
-        hasher.update(slice);
-        hasher.finish(&outer);
-    }
+    sha256d.hash(slice, &outer);
     var combined = try allocator.alloc(u8, slice.len + 4);
     @memcpy(combined[0..slice.len], slice);
     @memcpy(combined[slice.len..], outer[0..4]);
@@ -38,6 +34,7 @@ pub fn checkEncodeSliceToFmt(allocator: std.mem.Allocator, slice: []const u8) Er
 
 /// Decode a base58check-encoded string
 /// Optimized for the case where the string is a valid base58check string
+/// |data|checkSum(4bytes)|
 pub fn fromCheck(allocator: std.mem.Allocator, encoded: []const u8) Error![]u8 {
     var decoder = base58.Decoder.init(.{});
     const decoded = try decoder.decodeAlloc(allocator, encoded);

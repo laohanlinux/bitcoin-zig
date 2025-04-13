@@ -8,8 +8,8 @@
 
 const std = @import("std");
 const opcodes = @import("opcode.zig");
-const hash_types = @import("hashtypes");
-const encode = @import("consensus").encode;
+const hash_types = @import("../hashtypes/lib.zig");
+const encode = @import("../consensus/lib.zig").encode;
 const DecoderOption = encode.DecoderOption;
 const EncoderOption = encode.EncoderOption;
 const Reader = encode.Reader;
