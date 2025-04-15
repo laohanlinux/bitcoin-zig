@@ -28,10 +28,10 @@ pub const Script = struct {
     }
 
     /// Create script from existing bytes
-    pub fn fromBytes(bytes: []const u8, allocator: std.mem.Allocator) !Script {
-        const script_bytes = try allocator.dupe(u8, bytes);
+    pub fn fromBytes(allocator: std.mem.Allocator, bytes: []const u8) !Script {
+        const scriptBytes = try allocator.dupe(u8, bytes);
         return Script{
-            .bytes = script_bytes,
+            .bytes = scriptBytes,
             .allocator = allocator,
         };
     }
@@ -88,6 +88,7 @@ pub const Script = struct {
 
     /// Checks whether a script pubkey is a p2sh output
     pub fn isP2sh(self: *const Script) bool {
+        std.debug.print("isP2sh: {d}, {any}\n", .{ self.bytes.len, self.bytes });
         return self.bytes.len == 23 and
             self.bytes[0] == opcodes.all.OP_HASH160.into_u8() and
             self.bytes[1] == opcodes.all.OP_PUSHBYTES_20.into_u8() and

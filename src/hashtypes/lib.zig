@@ -1,5 +1,5 @@
 const std = @import("std");
-const hashes = @import("hashes");
+const hashes = @import("../hashes/lib.zig");
 const hashEngine = hashes.engine;
 const HashType = hashEngine.HashType;
 const hex = hashEngine.hex;
@@ -26,6 +26,23 @@ pub fn HashTrait(comptime hash_type: HashType) type {
     };
 }
 
+pub const Hash256 = struct {
+    buf: [32]u8 = [1]u8{0} ** 32,
+    h: hashEngine.HashEngine(hashEngine.HashType.sha256),
+
+    pub fn init() @This() {
+        return .{ .h = hashEngine.HashEngine(hashEngine.HashType.sha256).init(.{}) };
+    }
+
+    pub fn engine() hashEngine.HashEngine(hashEngine.HashType.sha256) {
+        return hashEngine.HashEngine(hashEngine.HashType.sha256).init(.{});
+    }
+
+    pub fn hash(input: []const u8, out: *[32]u8) void {
+        hashEngine.HashEngine(.sha256).hash(input, out);
+    }
+};
+
 pub const Hash256D = struct {
     buf: [32]u8 = [1]u8{0} ** 32,
     h: hashes.HashEngine(hashes.HashType.sha256d),
@@ -48,13 +65,6 @@ pub const Hash256D = struct {
         return self.buf;
     }
 
-    /// other interface implement.
-    pub fn sum(self: @This(), data: []const u8) [32]u8 {
-        self.h.update(data);
-        self.h.finish(&self.buf);
-        return self.buf;
-    }
-
     pub fn engine() hashes.HashEngine(.sha256d) {
         return hashes.HashEngine(.sha256d).init(.{});
     }
@@ -63,19 +73,19 @@ pub const Hash256D = struct {
 /// A 160-bit hash.
 pub const Hash160 = struct {
     buf: [20]u8 = [1]u8{0} ** 20,
-    h: hashes.HashEngine(.ripemd160),
+    h: hashEngine.HashEngine(.hash160),
 
     pub fn init() @This() {
-        return .{ .h = hashes.HashEngine(.ripemd160).init(.{}) };
+        return .{ .h = hashEngine.HashEngine(.hash160).init(.{}) };
     }
 
-    pub fn fromHash(hash: [20]u8) @This() {
-        return .{ .h = hashes.HashEngine(.ripemd160).init(.{}), .buf = hash };
+    pub fn fromHash(_hash: [20]u8) @This() {
+        return .{ .h = hashEngine.HashEngine(.hash160).init(.{}), .buf = _hash };
     }
 
-    /// other interface implement.
-    pub fn engine() hashes.HashEngine(.ripemd160) {
-        return hashes.HashEngine(.ripemd160).init(.{});
+    pub fn hash(input: []const u8, out: *[20]u8) void {
+        const engine = hashEngine.HashEngine(.hash160);
+        engine.hash(input, out);
     }
 };
 
@@ -95,7 +105,7 @@ pub const ScriptHash = Hash160;
 /// SegWit version of a public key hash.
 pub const WPubkeyHash = Hash160;
 /// SegWit version of a Bitcoin Script bytecode hash.
-pub const WScriptHash = Hash160;
+pub const WScriptHash = Hash256;
 
 /// A hash of the Merkle tree branch or root for transactions
 pub const TxMerkleNode = Hash256D;

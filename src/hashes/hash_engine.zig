@@ -6,6 +6,7 @@ pub const HashType = enum {
     sha256d,
     sha512,
     ripemd160,
+    hash160,
 };
 
 fn sha256d() type {
@@ -27,6 +28,46 @@ fn sha256d() type {
             var sha256d_hasher = crypto.hash.sha2.Sha256.init(.{});
             sha256d_hasher.update(&hash);
             sha256d_hasher.final(out);
+        }
+    };
+}
+
+/// Hash160 is a combination of SHA-256 and RIPEMD-160 hash functions.
+/// It first applies SHA-256 on the input and then applies RIPEMD-160 on the result.
+/// This is commonly used in Bitcoin for address generation.
+/// Hash160(x) = RIPEMD-160(SHA-256(x))
+fn Hash160() type {
+    return struct {
+        const Self = @This();
+
+        pub fn init() Self {
+            return .{};
+        }
+
+        pub fn hash(input: []const u8, out: *[20]u8) void {
+            var tmp: [32]u8 = undefined;
+            {
+                var hashEngine = HashEngine(.sha256).init(.{});
+                hashEngine.update(input);
+                hashEngine.finish(&tmp);
+            }
+            var hasher = Ripemd160.hash(tmp[0..32]);
+            std.mem.copyForwards(u8, out, hasher.bytes[0..20]);
+        }
+    };
+}
+
+fn ripemd160() type {
+    return struct {
+        const Self = @This();
+
+        pub fn init() Self {
+            return .{};
+        }
+
+        pub fn hash(input: []const u8, out: *[20]u8) void {
+            var hasher = Ripemd160.hash(input);
+            std.mem.copyForwards(u8, out, hasher.bytes[0..20]);
         }
     };
 }
@@ -55,8 +96,9 @@ pub fn HashEngine(h: HashType) type {
         hasher: switch (h) {
             .sha256 => crypto.hash.sha2.Sha256,
             .sha256d => sha256d(),
-            .ripemd160 => Ripemd160,
+            .ripemd160 => ripemd160(),
             .sha512 => crypto.hash.sha2.Sha512,
+            .hash160 => Hash160(),
         },
         pub const Options = struct {};
         const Self = @This();
@@ -66,10 +108,21 @@ pub fn HashEngine(h: HashType) type {
                 .hasher = switch (h) {
                     .sha256 => crypto.hash.sha2.Sha256.init(.{}),
                     .sha256d => sha256d().init(),
-                    .ripemd160 => Ripemd160{ .bytes = undefined },
+                    .ripemd160 => ripemd160().init(),
                     .sha512 => crypto.hash.sha2.Sha512.init(.{}),
+                    .hash160 => Hash160().init(),
                 },
             };
+        }
+
+        pub fn toHasher(self: *const Self) switch (h) {
+            .sha256 => crypto.hash.sha2.Sha256,
+            .sha256d => sha256d(),
+            .ripemd160 => ripemd160(),
+            .sha512 => crypto.hash.sha2.Sha512,
+            .hash160 => Hash160(),
+        } {
+            return self.hasher;
         }
 
         pub fn hash(input: []const u8, out: *[
@@ -78,24 +131,27 @@ pub fn HashEngine(h: HashType) type {
                 .sha256d => 32,
                 .ripemd160 => 20,
                 .sha512 => 64,
+                .hash160 => 20,
             }
         ]u8) void {
             switch (h) {
                 .ripemd160 => {
-                    const _hash = Ripemd160.hash(input).bytes;
-                    std.mem.copyForwards(u8, out, _hash[0..20]);
+                    ripemd160().hash(input, out);
                 },
                 .sha256, .sha256d => {
                     var hashEngine = Self.init(.{});
                     hashEngine.update(input);
                     hashEngine.finish(out);
                 },
+                .hash160 => {
+                    Hash160().hash(input, out);
+                },
                 else => @compileError("not implemented"),
             }
         }
 
         pub fn update(self: *Self, data: []const u8) void {
-            if (h == .ripemd160) {
+            if (h == .ripemd160 or h == .hash160) {
                 @compileError("not implemented, only hash() is supported");
             } else {
                 self.hasher.update(data);
@@ -110,6 +166,7 @@ pub fn HashEngine(h: HashType) type {
                     .sha256d => 32,
                     .ripemd160 => 20, // 160 / 8
                     .sha512 => 64,
+                    .hash160 => 20,
                 }
             ]u8,
         ) void {
@@ -126,12 +183,14 @@ pub fn Hash(h: HashType) type {
                 .sha256d => 32,
                 .ripemd160 => 20,
                 .sha512 => 64,
+                .hash160 => 20,
             }
         ]u8 = [1]u8{0} ** switch (h) {
             .sha256 => 32,
             .sha256d => 32,
             .ripemd160 => 20,
             .sha512 => 64,
+            .hash160 => 20,
         },
         h: HashEngine(h),
 
@@ -163,7 +222,7 @@ test "hash engine" {
     // Print the hash in hexadecimal format
     const hex_hash = try hex(std.testing.allocator, &hash);
     defer std.testing.allocator.free(hex_hash);
-    std.debug.print("hash: {s}\n", .{hex_hash});
+    // std.debug.print("hash: {s}\n", .{hex_hash});
 
     // Create expected hash for comparison
     var expected: [32]u8 = undefined;
@@ -183,10 +242,10 @@ test "sha256d" {
     engine.finish(&hash);
     const hex_hash = try hex(std.testing.allocator, &hash);
     defer std.testing.allocator.free(hex_hash);
-    std.debug.print("hash: {s}\n", .{hex_hash});
+    // std.debug.print("hash: {s}\n", .{hex_hash});
 
-    const hash256 = HashType.sha256;
-    std.debug.print("{}\n", .{hash256});
+    // const hash256 = HashType.sha256;
+    // std.debug.print("{}\n", .{hash256});
 }
 
 test "ripemd160" {

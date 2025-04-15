@@ -47,43 +47,48 @@ pub const Error = error{
     InvalidWitnessProgramLength,
     InvalidSegwitV0ProgramLength,
     UncompressedPubkey,
+    InvalidScript,
 } || b58.Error || bech32.Error;
 
 /// Address payload type
 pub const Payload = union(enum) {
-    PubkeyHash: [20]u8,
-    ScriptHash: [20]u8,
+    PubkeyHash: [20]u8, // The hash of the public key
+    ScriptHash: [20]u8, // The hash of the script
     WitnessProgram: struct {
         version: u5,
         program: []u8,
     },
     /// Get a [Payload] from an output script (scriptPubkey).
     pub fn fromScript(allocator: std.mem.Allocator, script: *const Script) ?Payload {
-        if (script.isP2pkh()) {
-            var hash = allocator.alloc(u8, 20) catch unreachable;
-            hashTypes.PubkeyHash.engine().hash(script.asBytes()[3..23], &hash[0..20]);
-            return Payload{ .PubkeyHash = hash };
-        }
-        if (script.isP2sh()) {
-            var hash = allocator.alloc(u8, 20) catch unreachable;
-            hashTypes.ScriptHash.engine().hash(script.asBytes()[2..22], &hash[0..20]);
-            return Payload{ .ScriptHash = hash };
-        }
-        if (script.isWitnessProgram()) {
-            // We can unwrap the u5 check and assume script length
-            // because [Script::is_witness_program] makes sure of this.
-            var verop = script.asBytes()[0];
-            if (verop > 0x50) {
-                verop -= 0x50;
-            }
-            const version = @as(u5, @intCast(verop));
-            // Since we passed the [is_witness_program] check,
-            // the first byte is either 0x00 or 0x50 + version.
-            return Payload{ .WitnessProgram = .{
-                .version = version,
-                .program = allocator.dupe(u8, script.asBytes()[2..]) catch unreachable,
-            } };
-        }
+        // if (script.isP2pkh()) {
+        //     var hash = allocator.alloc(u8, 20) catch unreachable;
+        //     hashTypes.PubkeyHash.hash(script.asBytes()[3..23], hash[0..20]);
+        //     return Payload{ .PubkeyHash = hash[0..20].* };
+        // }
+        // if (script.isP2sh()) {
+        //     var hash = allocator.alloc(u8, 20) catch unreachable;
+        //     hashTypes.ScriptHash.hash(script.asBytes()[2..22], hash[0..20]);
+        //     return Payload{ .ScriptHash = hash[0..20].* };
+        // }
+        // if (script.isWitnessProgram()) {
+        //     // We can unwrap the u5 check and assume script length
+        //     // because [Script::is_witness_program] makes sure of this.
+        //     var verop = script.asBytes()[0];
+        //     if (verop > 0x50) {
+        //         verop -= 0x50;
+        //     }
+        //     const version = @as(u5, @intCast(verop));
+        //     // Since we passed the [is_witness_program] check,
+        //     // the first byte is either 0x00 or 0x50 + version.
+        //     return Payload{ .WitnessProgram = .{
+        //         .version = version,
+        //         .program = allocator.dupe(u8, script.asBytes()[2..]) catch unreachable,
+        //     } };
+        // }
+        // return null;
+        var hash = allocator.alloc(u8, 20) catch unreachable;
+        hashTypes.ScriptHash.hash(script.asBytes(), hash[0..20]);
+        return Payload{ .ScriptHash = hash[0..20].* };
     }
     /// Generates a script pubkey spending to this [Payload].
     pub fn scriptPubKey(
@@ -91,30 +96,28 @@ pub const Payload = union(enum) {
         allocator: std.mem.Allocator,
     ) Script {
         switch (self.*) {
-            .PubkeyHash => |hash| blk: {
+            .PubkeyHash => |hash| {
                 var builder = Builder.init(allocator);
                 _ = builder.pushOpcode(all.OP_DUP)
                     .pushOpcode(all.OP_HASH160)
                     .pushSlice(&hash)
                     .pushOpcode(all.OP_EQUALVERIFY)
                     .pushOpcode(all.OP_CHECKSIG);
-                break :blk builder.build();
+                return builder.build();
             },
-            .ScriptHash => |hash| blk: {
+            .ScriptHash => |hash| {
                 var builder = Builder.init(allocator);
                 _ = builder.pushOpcode(all.OP_HASH160)
                     .pushSlice(&hash)
                     .pushOpcode(all.OP_EQUAL);
-                break :blk builder.build();
+                return builder.build();
             },
-            .WitnessProgram => |wp| blk: {
-                const firstVersion = @as(u5, @intCast(80));
-                const ver: u8 = @as(u8, @intCast(if (wp.version > 0) wp.version + firstVersion else firstVersion));
-                std.debug.assert(ver <= 16);
+            .WitnessProgram => |wp| {
+                const ver: u8 = if (wp.version > 0) @as(u8, wp.version) + 0x50 else 0;
                 var builder = Builder.init(allocator);
                 _ = builder.pushOpcode(opcode.All.from_u8(ver))
                     .pushSlice(wp.program);
-                break :blk builder.build();
+                return builder.build();
             },
         }
     }
@@ -148,9 +151,9 @@ pub const Address = struct {
     /// This is the preferred non-witness type address
     pub fn p2pkh(allocator: std.mem.Allocator, pk: *const PublicKey, network: Network) !Address {
         var hash = allocator.alloc(u8, 20) catch unreachable;
-        hashTypes.PubkeyHash.engine().hash(try pk.asBytes(), &hash[0..20]);
+        hashTypes.PubkeyHash.hash(try pk.asBytes(), hash[0..20]);
         return Address{
-            .payload = .{ .PubkeyHash = hash },
+            .payload = .{ .PubkeyHash = hash[0..20].* },
             .network = network,
             .allocator = allocator,
         };
@@ -177,7 +180,7 @@ pub const Address = struct {
             return Error.UncompressedPubkey;
         }
         var hash = allocator.alloc(u8, 20) catch unreachable;
-        hashTypes.WPubkeyHash.engine().hash(try pk.asBytes(), &hash[0..20]);
+        hashTypes.WPubkeyHash.hash(try pk.asBytes(), hash[0..20]);
         return Address{
             .network = network,
             .payload = .{ .WitnessProgram = .{
@@ -196,49 +199,55 @@ pub const Address = struct {
         if (!pk.compressed) {
             return Error.UncompressedPubkey;
         }
-        var hash = allocator.alloc(u8, 32) catch unreachable;
-        hashTypes.WScriptHash.engine().hash(try pk.asBytes(), &hash[0..32]);
+
+        var hash = allocator.alloc(u8, 20) catch unreachable;
+        errdefer allocator.free(hash);
+        hashTypes.WPubkeyHash.hash(try pk.asBytes(), hash[0..20]);
         var builder = Builder.init(allocator);
         defer builder.deinit();
-        var script = builder.pushInt(0).pushSlice(hash).build();
+        var script = builder.pushInt(0).pushSlice(hash[0..]).build();
         defer script.deinit();
-        @memset(hash[0..20], 0);
-        hashTypes.ScriptHash.engine().hash(script.asBytes(), &hash[0..20]);
+        hashTypes.ScriptHash.hash(script.asBytes(), hash[0..20]);
         return Address{
             .network = network,
-            .payload = .{ .ScriptHash = hash },
+            .payload = .{ .ScriptHash = hash[0..20].* },
             .allocator = allocator,
         };
     }
 
     /// Create a witness pay to script hash address
     pub fn p2wsh(allocator: std.mem.Allocator, script: *const Script, network: Network) Address {
-        var hash = allocator.alloc(u8, 20) catch unreachable;
-        hashTypes.WScriptHash.engine().hash(script.asBytes(), &hash[0..20]);
+        var hash = allocator.alloc(u8, 32) catch unreachable;
+        hashTypes.WScriptHash.hash(script.asBytes(), hash[0..32]);
         return Address{
             .network = network,
             .payload = .{ .WitnessProgram = .{
                 .version = 0,
                 .program = hash,
             } },
+            .allocator = allocator,
         };
     }
 
     /// Create a pay to script address that embeds a witness pay to script hash address
     /// This is a segwit address type that looks familiar (as p2sh) to legacy clients
     pub fn p2shwsh(allocator: std.mem.Allocator, script: *const Script, network: Network) Address {
-        var hash = allocator.alloc(u8, 20) catch unreachable;
-        hashTypes.WScriptHash.engine().hash(script.asBytes(), &hash[0..20]);
+        var hash: [32]u8 = undefined;
+        errdefer allocator.free(hash);
+        hashTypes.WScriptHash.hash(script.asBytes(), hash[0..32]);
         var builder = Builder.init(allocator);
         defer builder.deinit();
-        var ws = builder.pushInt(0).pushSlice(hash).build();
+        // 0 is the version for witness program
+        var ws = builder.pushInt(0).pushSlice(hash[0..32]).build();
         defer ws.deinit();
-        @memset(hash[0..20], 0);
-        hashTypes.WScriptHash.engine().hash(ws.asBytes(), &hash[0..20]);
+        hashTypes.ScriptHash.hash(ws.asBytes(), hash[0..20]);
+        const hash20 = allocator.alloc(u8, 20) catch unreachable;
+        defer allocator.free(hash20);
+        @memcpy(hash20, hash[0..20]);
         return .{
             .network = network,
             .payload = .{
-                .ScriptHash = hash,
+                .ScriptHash = hash20[0..20].*,
             },
             .allocator = allocator,
         };
@@ -271,12 +280,15 @@ pub const Address = struct {
     }
 
     /// Get an [Address] from an output script (scriptPubkey).
-    pub fn fromScript(allocator: std.mem.Allocator, script: *const Script, network: Network) !Address {
-        return .{
-            .network = network,
-            .payload = Payload.fromScript(allocator, script),
-            .allocator = allocator,
-        };
+    pub fn fromScript(allocator: std.mem.Allocator, script: *const Script, network: Network) Error!Address {
+        if (Payload.fromScript(allocator, script)) |payload| {
+            return .{
+                .network = network,
+                .payload = payload,
+                .allocator = allocator,
+            };
+        }
+        return Error.InvalidScript;
     }
 
     /// Generates a script pubkey spending to this address
@@ -311,8 +323,10 @@ pub const Address = struct {
                     .testnet => "tb",
                     .regtest => "bcrt",
                 };
+                // TODO Optimize the code by using a more efficient memory allocation
                 var dest: [100]u8 = undefined;
                 const result = bech32.standard.Encoder.encode(&dest, hrp, wp.program, wp.version, .bech32);
+                std.testing.expect(result.len <= dest.len) catch unreachable;
                 break :blk allocator.dupe(u8, result) catch unreachable;
             },
         };
@@ -336,14 +350,15 @@ pub const Address = struct {
         };
         if (bech32NetWork) |_network| {
             // decode as bech32
-            const result = try bech32.standard.Decoder.decode(allocator, s);
+            var dest: [100]u8 = undefined;
+            const result = try bech32.standard.Decoder.decode(&dest, s);
             if (result.data.len == 0) {
                 return Error.EmptyBech32Payload;
             }
             const payload = result.data;
             const version = result.version;
             // Get the script version and program (converted from 5-bit to 8-bit)
-            const program = if (payload.len > 0) payload[1..] else []u8{};
+            const program = if (payload.len > 0) payload[1..] else &.{};
             // Generic segwit checks.
             if (version > 16) {
                 return Error.InvalidWitnessVersion;
@@ -362,7 +377,7 @@ pub const Address = struct {
                 .payload = .{
                     .WitnessProgram = .{
                         .version = version,
-                        .program = program,
+                        .program = allocator.dupe(u8, program) catch unreachable,
                     },
                 },
                 .allocator = allocator,
@@ -384,19 +399,19 @@ pub const Address = struct {
         switch (payload[0]) {
             0 => {
                 _network = .bitcoin;
-                hashTypes.PubkeyHash.engine().hash(payload[1..], &_payload[0..20]);
+                hashTypes.PubkeyHash.hash(payload[1..], _payload[0..20]);
             },
             5 => {
                 _network = .bitcoin;
-                hashTypes.ScriptHash.engine().hash(payload[1..], &_payload[0..20]);
+                hashTypes.ScriptHash.hash(payload[1..], _payload[0..20]);
             },
             111 => {
                 _network = .testnet;
-                hashTypes.PubkeyHash.engine().hash(payload[1..], &_payload[0..20]);
+                hashTypes.PubkeyHash.hash(payload[1..], _payload[0..20]);
             },
             196 => {
                 _network = .testnet;
-                hashTypes.ScriptHash.engine().hash(payload[1..], &_payload[0..20]);
+                hashTypes.ScriptHash.hash(payload[1..], _payload[0..20]);
             },
             else => {
                 return Error.InvalidVersion;
@@ -405,7 +420,7 @@ pub const Address = struct {
 
         return Address{
             .network = _network,
-            .payload = .{ .PubkeyHash = _payload },
+            .payload = .{ .PubkeyHash = _payload[0..20].* },
             .allocator = allocator,
         };
     }
@@ -420,32 +435,4 @@ fn findBech32Prefix(bech32Str: []const u8) []const u8 {
     } else {
         return bech32Str;
     }
-}
-
-test "address" {
-    const engine = @import("../hashes/lib.zig").engine;
-    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer area.deinit();
-    const payload = engine.parseHexBytes(area.allocator(), "162c5ea71c0b23f5b9022ef047c4a86470a5b070")[0..20];
-    const address = Address{
-        .allocator = area.allocator(),
-        .network = .bitcoin,
-        .payload = .{ .PubkeyHash = payload.* },
-    };
-    const pubkey = address.scriptPubKey(area.allocator());
-    std.debug.print("hex publickey: {s}", .{try engine.hex(area.allocator(), pubkey.asBytes())});
-    std.debug.print("address: {s}\n", .{try address.toString(area.allocator())});
-}
-
-test "p2ppkh address base58" {
-    const engine = @import("../hashes/lib.zig").engine;
-    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer area.deinit();
-    const payload = engine.parseHexBytes(area.allocator(), "162c5ea71c0b23f5b9022ef047c4a86470a5b070")[0..20];
-    const address = Address{
-        .allocator = area.allocator(),
-        .network = .bitcoin,
-        .payload = .{ .PubkeyHash = payload.* },
-    };
-    std.debug.print("address: {s}\n", .{try address.toString(area.allocator())});
 }

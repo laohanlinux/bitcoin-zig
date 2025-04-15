@@ -9,7 +9,7 @@ pub const Error = error{
 
 pub fn encode(allocator: std.mem.Allocator, source: []const u8) Error![]u8 {
     var encoder = base58.Encoder.init(.{});
-    const encoded = encoder.encodeAlloc(allocator, source) catch unreachable;
+    const encoded = try encoder.encodeAlloc(allocator, source);
     return encoded;
 }
 

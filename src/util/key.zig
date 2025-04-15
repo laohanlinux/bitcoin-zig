@@ -34,9 +34,10 @@ pub const PublicKey = struct {
         return buf.toOwnedSlice();
     }
 
-    pub fn asBytes(self: *const Self) ![]u8 {
+    /// Warning: if this function is not inlined, the result will be incorrect(here returns a stack memory, it will be freed after the function returns)
+    pub inline fn asBytes(self: *const Self) ![]const u8 {
         if (self.compressed) {
-            return self.key.toCompressedSec1()[0..1];
+            return self.key.toCompressedSec1()[0..];
         } else {
             return self.key.toUncompressedSec1()[0..];
         }
@@ -51,7 +52,9 @@ pub const PublicKey = struct {
                 return Error.Base58Error;
             },
         };
-        const key = try Secp256k1.fromSec1(bytes);
+        const key = Secp256k1.fromSec1(bytes) catch {
+            return Error.Secp256k1Error;
+        };
         return PublicKey{ .key = key, .compressed = compressed };
     }
 };
@@ -140,5 +143,5 @@ test "private key" {
     try std.testing.expectEqualSlices(u8, toWif, "cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy");
     // const publicKeyBytes = try publicKey.toBytes(area.allocator());
     // try std.testing.expectEqualSlices(u8, publicKeyBytes, "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798");
-    std.debug.print("private key: {any}\n", .{Network.bitcoin});
+    // std.debug.print("private key: {any}\n", .{Network.bitcoin});
 }
