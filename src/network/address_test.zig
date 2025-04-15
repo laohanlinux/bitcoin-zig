@@ -13,10 +13,10 @@ const Error = local.address.Error;
 fn roundtrips(addr: *const Address) !void {
     var area = std.heap.ArenaAllocator.init(addr.allocator);
     defer area.deinit();
-    const from_str = try Address.fromString(area.allocator(), try addr.toString(area.allocator()));
-    try std.testing.expectEqual(addr.*, from_str);
-    const from_script = try Address.fromScript(area.allocator(), &addr.scriptPubKey(area.allocator()), addr.network);
-    try std.testing.expectEqual(addr.*, from_script);
+    const fromStr = try Address.fromString(area.allocator(), try addr.toString(area.allocator()));
+    try std.testing.expectEqualSlices(u8, try addr.toString(area.allocator()), try fromStr.toString(area.allocator()));
+    const fromScript = try Address.fromScript(area.allocator(), &addr.scriptPubKey(area.allocator()), addr.network);
+    try std.testing.expectEqualSlices(u8, try addr.toString(area.allocator()), try fromScript.toString(area.allocator()));
 }
 
 test "address" {
@@ -88,7 +88,7 @@ test "p2sh parse" {
     defer area.deinit();
     const payload = parseHex(area.allocator(), "552103a765fc35b3f210b95223846b36ef62a4e53e34e2925270c2c7906b92c9f718eb2103c327511374246759ec8d0b89fa6c6b23b33e11f92c5bc155409d86de0c79180121038cae7406af1f12f4786d820a1466eec7bc5785a1b5e4a387eca6d797753ef6db2103252bfb9dcaab0cd00353f2ac328954d791270203d66c2be8b430f115f451b8a12103e79412d42372c55dd336f2eb6eb639ef9d74a22041ba79382c74da2338fe58ad21035049459a4ebc00e876a9eef02e72a3e70202d3d1f591fc0dd542f93f642021f82102016f682920d9723c61b27f562eb530c926c00106004798b6471e8c52c60ee02057ae");
     const script = try Script.fromBytes(area.allocator(), payload);
-    const address = try Address.fromScript(area.allocator(), &script, .testnet);
+    const address = try Address.p2sh(area.allocator(), &script, .testnet);
     try std.testing.expectEqualSlices(u8, try address.toString(area.allocator()), "2N3zXjbwdTcPsJiy8sUK9FhWJhqQCxA8Jjr");
     try std.testing.expectEqual(address.addressType().?, .P2sh);
 }
@@ -139,19 +139,45 @@ test "p2shwsh" {
     try std.testing.expectEqual(address.addressType().?, .P2sh);
 }
 
-// test "non existent segwit version" {
-//     var area = std.heap.ArenaAllocator.init(std.testing.allocator);
-//     defer area.deinit();
-//     const version: u5 = 13;
-//     // 40-byte program
-//     const program = parseHex(area.allocator(), "654f6ea368e0acdfd92976b7c2103a1b26313f430654f6ea368e0acdfd92976b7c2103a1b26313f4");
-//     const address = Address{
-//         .network = .bitcoin,
-//         .payload = .{ .WitnessProgram = .{
-//             .version = version,
-//             .program = program,
-//         } },
-//         .allocator = area.allocator(),
-//     };
-//     try roundtrips(&address);
-// }
+test "non existent segwit version" {
+    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer area.deinit();
+    const version: u5 = 13;
+    // 40-byte program
+    const program = parseHex(area.allocator(), "654f6ea368e0acdfd92976b7c2103a1b26313f430654f6ea368e0acdfd92976b7c2103a1b26313f4");
+    const address = Address{
+        .network = .bitcoin,
+        .payload = .{ .WitnessProgram = .{
+            .version = version,
+            .program = program,
+        } },
+        .allocator = area.allocator(),
+    };
+    try roundtrips(&address);
+}
+
+test "bip173 vectors" {
+    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer area.deinit();
+    const vectors = [_][2][]const u8{ .{ "BC1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KV8F3T4", "0014751e76e8199196d454941c45d1b3a323f1433bd6" }, .{ "tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7", "00201863143c14c5166804bd19203356da136c985678cd4d27a1b8c6329604903262" }, .{ "bc1pw508d6qejxtdg4y5r3zarvary0c5xw7kw508d6qejxtdg4y5r3zarvary0c5xw7k7grplx", "5128751e76e8199196d454941c45d1b3a323f1433bd6751e76e8199196d454941c45d1b3a323f1433bd6" }, .{ "BC1SW50QA3JX3S", "6002751e" }, .{ "bc1zw508d6qejxtdg4y5r3zarvaryvg6kdaj", "5210751e76e8199196d454941c45d1b3a323" }, .{ "tb1qqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesrxh6hy", "0020000000c4a5cad46221b2a187905e5266362b99d5e91c6ce24d165dab93e86433" } };
+    for (vectors) |vector| {
+        const address = try Address.fromString(area.allocator(), vector[0]);
+        try std.testing.expectEqualSlices(u8, try engine.hex(area.allocator(), address.scriptPubKey(area.allocator()).asBytes()), vector[1]);
+    }
+    const invalidVectors = [_][]const u8{ "tc1qw508d6qejxtdg4y5r3zarvary0c5xw7kg3g4ty", "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t5", "BC13W508D6QEJXTDG4Y5R3ZARVARY0C5XW7KN40WF2", "bc1rw5uspcuh", "bc10w508d6qejxtdg4y5r3zarvary0c5xw7kw508d6qejxtdg4y5r3zarvary0c5xw7kw5rljs90", "BC1QR508D6QEJXTDG4Y5R3ZARVARYV98GJ9P", "tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sL5k7", "bc1zw508d6qejxtdg4y5r3zarvaryvqyzf3du", "tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3pjxtptv", "bc1gmk9yu" };
+    for (invalidVectors) |vector| {
+        _ = Address.fromString(area.allocator(), vector) catch |err| {
+            std.debug.print("Error: {s}\n", .{@errorName(err)});
+            continue;
+        };
+        unreachable;
+    }
+}
+
+test "json_serialize" {
+    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer area.deinit();
+    const address = try Address.fromString(area.allocator(), "132F25rTsvBdp9JzLLBHP5mvGY66i1xdiM");
+    const json = try address.toJson(area.allocator());
+    std.debug.print("JSON: {s}\n", .{json});
+}

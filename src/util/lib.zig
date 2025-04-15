@@ -18,3 +18,30 @@ pub fn hasFn(comptime a: type, fn_name: []const u8) bool {
         else => return false,
     }
 }
+
+pub inline fn tU64(t: u64) u64 {
+    return t;
+}
+
+pub inline fn tI64(t: i64) i64 {
+    return t;
+}
+
+pub inline fn tU32(t: u32) u32 {
+    return t;
+}
+
+pub inline fn tI32(t: i32) i32 {
+    return t;
+}
+
+test "toU64" {
+    try std.testing.expect(tU64(100) == 100);
+    try std.testing.expect(tU64(100.0) == 100);
+    try std.testing.expect(tI64(100) == 100);
+    try std.testing.expect(tI64(100.0) == 100);
+    try std.testing.expect(tU32(100) == 100);
+    try std.testing.expect(tU32(100.0) == 100);
+    try std.testing.expect(tI32(100) == 100);
+    try std.testing.expect(tI32(100.0) == 100);
+}

@@ -60,35 +60,35 @@ pub const Payload = union(enum) {
     },
     /// Get a [Payload] from an output script (scriptPubkey).
     pub fn fromScript(allocator: std.mem.Allocator, script: *const Script) ?Payload {
-        // if (script.isP2pkh()) {
-        //     var hash = allocator.alloc(u8, 20) catch unreachable;
-        //     hashTypes.PubkeyHash.hash(script.asBytes()[3..23], hash[0..20]);
-        //     return Payload{ .PubkeyHash = hash[0..20].* };
-        // }
-        // if (script.isP2sh()) {
-        //     var hash = allocator.alloc(u8, 20) catch unreachable;
-        //     hashTypes.ScriptHash.hash(script.asBytes()[2..22], hash[0..20]);
-        //     return Payload{ .ScriptHash = hash[0..20].* };
-        // }
-        // if (script.isWitnessProgram()) {
-        //     // We can unwrap the u5 check and assume script length
-        //     // because [Script::is_witness_program] makes sure of this.
-        //     var verop = script.asBytes()[0];
-        //     if (verop > 0x50) {
-        //         verop -= 0x50;
-        //     }
-        //     const version = @as(u5, @intCast(verop));
-        //     // Since we passed the [is_witness_program] check,
-        //     // the first byte is either 0x00 or 0x50 + version.
-        //     return Payload{ .WitnessProgram = .{
-        //         .version = version,
-        //         .program = allocator.dupe(u8, script.asBytes()[2..]) catch unreachable,
-        //     } };
-        // }
-        // return null;
-        var hash = allocator.alloc(u8, 20) catch unreachable;
-        hashTypes.ScriptHash.hash(script.asBytes(), hash[0..20]);
-        return Payload{ .ScriptHash = hash[0..20].* };
+        if (script.isP2pkh()) {
+            var hash = allocator.alloc(u8, 20) catch unreachable;
+            hashTypes.PubkeyHash.hash(script.asBytes()[3..23], hash[0..20]);
+            return Payload{ .PubkeyHash = hash[0..20].* };
+        }
+        if (script.isP2sh()) {
+            var hash = allocator.alloc(u8, 20) catch unreachable;
+            hashTypes.ScriptHash.hash(script.asBytes()[2..22], hash[0..20]);
+            return Payload{ .ScriptHash = hash[0..20].* };
+        }
+        if (script.isWitnessProgram()) {
+            // We can unwrap the u5 check and assume script length
+            // because [Script::is_witness_program] makes sure of this.
+            var verop = script.asBytes()[0];
+            if (verop > 0x50) {
+                verop -= 0x50;
+            }
+            const version = @as(u5, @intCast(verop));
+            // Since we passed the [is_witness_program] check,
+            // the first byte is either 0x00 or 0x50 + version.
+            return Payload{ .WitnessProgram = .{
+                .version = version,
+                .program = allocator.dupe(u8, script.asBytes()[2..]) catch unreachable,
+            } };
+        }
+        return null;
+        // var hash = allocator.alloc(u8, 20) catch unreachable;
+        // hashTypes.ScriptHash.hash(script.asBytes(), hash[0..20]);
+        // return Payload{ .ScriptHash = hash[0..20].* };
     }
     /// Generates a script pubkey spending to this [Payload].
     pub fn scriptPubKey(
@@ -147,6 +147,13 @@ pub const Address = struct {
         self.payload.deinit(self.allocator);
     }
 
+    pub fn toJson(self: Address, allocator: std.mem.Allocator) ![]u8 {
+        return std.json.stringifyAlloc(allocator, .{
+            .payload = self.payload,
+            .network = self.network,
+        }, .{}) catch unreachable;
+    }
+
     /// Creates a pay to (compressed) public key hash address from a public key
     /// This is the preferred non-witness type address
     pub fn p2pkh(allocator: std.mem.Allocator, pk: *const PublicKey, network: Network) !Address {
@@ -163,9 +170,9 @@ pub const Address = struct {
     /// This address type was introduced with BIP16 and is the popular type to implement multi-sig these days.
     pub fn p2sh(allocator: std.mem.Allocator, script: *const Script, network: Network) !Address {
         var hash = allocator.alloc(u8, 20) catch unreachable;
-        hashTypes.ScriptHash.engine().hash(script.asBytes(), &hash[0..20]);
+        hashTypes.ScriptHash.hash(script.asBytes(), hash[0..20]);
         return Address{
-            .payload = .{ .ScriptHash = hash },
+            .payload = .{ .ScriptHash = hash[0..20].* },
             .network = network,
             .allocator = allocator,
         };
@@ -355,10 +362,9 @@ pub const Address = struct {
             if (result.data.len == 0) {
                 return Error.EmptyBech32Payload;
             }
-            const payload = result.data;
-            const version = result.version;
             // Get the script version and program (converted from 5-bit to 8-bit)
-            const program = if (payload.len > 0) payload[1..] else &.{};
+            const program = result.data;
+            const version = result.version;
             // Generic segwit checks.
             if (version > 16) {
                 return Error.InvalidWitnessVersion;
@@ -368,7 +374,7 @@ pub const Address = struct {
             }
 
             // Specific segwit v0 check.
-            if (version == 0 or (program.len != 20 and program.len != 32)) {
+            if (version == 0 and (program.len != 20 and program.len != 32)) {
                 return Error.InvalidSegwitV0ProgramLength;
             }
 

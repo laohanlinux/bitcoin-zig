@@ -47,7 +47,7 @@ pub const Script = struct {
     }
 
     /// Get script data as bytes
-    pub fn asBytes(self: *const Script) []const u8 {
+    pub inline fn asBytes(self: *const Script) []const u8 {
         return self.bytes;
     }
 
@@ -88,7 +88,6 @@ pub const Script = struct {
 
     /// Checks whether a script pubkey is a p2sh output
     pub fn isP2sh(self: *const Script) bool {
-        std.debug.print("isP2sh: {d}, {any}\n", .{ self.bytes.len, self.bytes });
         return self.bytes.len == 23 and
             self.bytes[0] == opcodes.all.OP_HASH160.into_u8() and
             self.bytes[1] == opcodes.all.OP_PUSHBYTES_20.into_u8() and

@@ -38,6 +38,8 @@ pub const Error = error{
     HRPTooLong,
     InvalidPadding,
     ChecksumTooShort,
+    VersionEmpty,
+    ProgramEmpty,
     Invalid,
 };
 
@@ -267,10 +269,13 @@ pub fn Bech32Decoder(comptime set: [32]u8) type {
 
             const sep = std.mem.lastIndexOfScalar(u8, source, '1') orelse unreachable;
             const hrp = source[0..sep];
+            if (hrp.len == 0) return Error.HRPEmpty;
+            if (sep + 1 >= source.len) return Error.VersionEmpty;
             const version = source[sep + 1];
+            if (sep + 2 >= source.len or source.len <= 6) return Error.ProgramEmpty;
+            if (sep + 2 > source.len - 6) return Error.Invalid;
             const data = source[sep + 2 .. source.len - 6];
             const checksum = source[source.len - 6 ..];
-
             var pmod_buf: [max_hrp_size]u8 = undefined;
             var res = Result{ .hrp = hrp, .data = &[0]u8{}, .encoding = undefined, .version = 0 };
             var polymod = Polymod{};

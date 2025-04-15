@@ -1,6 +1,8 @@
 const std = @import("std");
 const crypto = @import("std").crypto;
-const Ripemd160 = @import("ripemd160.zig").Ripemd160;
+const _Ripemd160 = @import("ripemd160.zig").Ripemd160;
+
+/// The type of hash to use
 pub const HashType = enum {
     sha256,
     sha256d,
@@ -9,7 +11,7 @@ pub const HashType = enum {
     hash160,
 };
 
-fn sha256d() type {
+fn Sha256d() type {
     return struct {
         hasher: crypto.hash.sha2.Sha256,
         const Self = @This();
@@ -51,13 +53,13 @@ fn Hash160() type {
                 hashEngine.update(input);
                 hashEngine.finish(&tmp);
             }
-            var hasher = Ripemd160.hash(tmp[0..32]);
+            var hasher = _Ripemd160.hash(tmp[0..32]);
             std.mem.copyForwards(u8, out, hasher.bytes[0..20]);
         }
     };
 }
 
-fn ripemd160() type {
+fn Ripemd160() type {
     return struct {
         const Self = @This();
 
@@ -66,7 +68,7 @@ fn ripemd160() type {
         }
 
         pub fn hash(input: []const u8, out: *[20]u8) void {
-            var hasher = Ripemd160.hash(input);
+            var hasher = _Ripemd160.hash(input);
             std.mem.copyForwards(u8, out, hasher.bytes[0..20]);
         }
     };
@@ -95,8 +97,8 @@ pub fn HashEngine(h: HashType) type {
     return struct {
         hasher: switch (h) {
             .sha256 => crypto.hash.sha2.Sha256,
-            .sha256d => sha256d(),
-            .ripemd160 => ripemd160(),
+            .sha256d => Sha256d(),
+            .ripemd160 => Ripemd160(),
             .sha512 => crypto.hash.sha2.Sha512,
             .hash160 => Hash160(),
         },
@@ -107,8 +109,8 @@ pub fn HashEngine(h: HashType) type {
             return .{
                 .hasher = switch (h) {
                     .sha256 => crypto.hash.sha2.Sha256.init(.{}),
-                    .sha256d => sha256d().init(),
-                    .ripemd160 => ripemd160().init(),
+                    .sha256d => Sha256d().init(),
+                    .ripemd160 => Ripemd160().init(),
                     .sha512 => crypto.hash.sha2.Sha512.init(.{}),
                     .hash160 => Hash160().init(),
                 },
@@ -117,8 +119,8 @@ pub fn HashEngine(h: HashType) type {
 
         pub fn toHasher(self: *const Self) switch (h) {
             .sha256 => crypto.hash.sha2.Sha256,
-            .sha256d => sha256d(),
-            .ripemd160 => ripemd160(),
+            .sha256d => Sha256d(),
+            .ripemd160 => Ripemd160(),
             .sha512 => crypto.hash.sha2.Sha512,
             .hash160 => Hash160(),
         } {
@@ -136,7 +138,7 @@ pub fn HashEngine(h: HashType) type {
         ]u8) void {
             switch (h) {
                 .ripemd160 => {
-                    ripemd160().hash(input, out);
+                    Ripemd160().hash(input, out);
                 },
                 .sha256, .sha256d => {
                     var hashEngine = Self.init(.{});
@@ -242,10 +244,6 @@ test "sha256d" {
     engine.finish(&hash);
     const hex_hash = try hex(std.testing.allocator, &hash);
     defer std.testing.allocator.free(hex_hash);
-    // std.debug.print("hash: {s}\n", .{hex_hash});
-
-    // const hash256 = HashType.sha256;
-    // std.debug.print("{}\n", .{hash256});
 }
 
 test "ripemd160" {
