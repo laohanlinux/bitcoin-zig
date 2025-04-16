@@ -22,25 +22,25 @@ pub const Denomination = enum {
     /// BTC
     bitcoin,
     /// mBTC
-    milli_bitcoin,
+    milliBitcoin,
     /// uBTC
-    micro_bitcoin,
+    microBitcoin,
     /// bits
     bit,
     /// satoshi
     satoshi,
     /// msat
-    milli_satoshi,
+    milliSatoshi,
 
     /// Get the number of decimal places relative to a satoshi
     pub fn precision(self: Denomination) i32 {
         return switch (self) {
-            .bitcoin => -8,
-            .milli_bitcoin => -5,
-            .micro_bitcoin => -2,
-            .bit => -2,
-            .satoshi => 0,
-            .milli_satoshi => 3,
+            .bitcoin => -8, // 1 BTC = 100,000,000 satoshis
+            .milliBitcoin => -5, // 1 mBTC = 100,000 satoshis
+            .microBitcoin => -2, // 1 uBTC = 100 satoshis
+            .bit => -2, // 1 bit = 100 satoshis
+            .satoshi => 0, // 1 satoshi = 1 satoshi
+            .milliSatoshi => 3, // 1 msat = 0.001 satoshis
         };
     }
 
@@ -48,22 +48,22 @@ pub const Denomination = enum {
     pub inline fn toString(self: Denomination) []const u8 {
         return switch (self) {
             .bitcoin => "BTC",
-            .milli_bitcoin => "mBTC",
-            .micro_bitcoin => "uBTC",
+            .milliBitcoin => "mBTC",
+            .microBitcoin => "uBTC",
             .bit => "bits",
             .satoshi => "satoshi",
-            .milli_satoshi => "msat",
+            .milliSatoshi => "msat",
         };
     }
 
     /// Parse denomination from string
     pub inline fn fromString(str: []const u8) !Denomination {
         if (std.mem.eql(u8, str, "BTC")) return .bitcoin;
-        if (std.mem.eql(u8, str, "mBTC")) return .milli_bitcoin;
-        if (std.mem.eql(u8, str, "uBTC")) return .micro_bitcoin;
+        if (std.mem.eql(u8, str, "mBTC")) return .milliBitcoin;
+        if (std.mem.eql(u8, str, "uBTC")) return .microBitcoin;
         if (std.mem.eql(u8, str, "bits")) return .bit;
         if (std.mem.eql(u8, str, "satoshi") or std.mem.eql(u8, str, "sat")) return .satoshi;
-        if (std.mem.eql(u8, str, "msat")) return .milli_satoshi;
+        if (std.mem.eql(u8, str, "msat")) return .milliSatoshi;
         return error.UnknownDenomination;
     }
 };
@@ -84,9 +84,11 @@ pub const ParseAmountError = error{
     InvalidCharacter,
     /// Unknown denomination
     UnknownDenomination,
+    /// Overflow denomination
     Overflow,
 };
 
+/// Format parse amount error string.
 pub inline fn formatParseAmountError(err: ParseAmountError) ![]u8 {
     return switch (err) {
         .UnknownDenomination => "unknown denomination",
@@ -100,9 +102,13 @@ pub inline fn formatParseAmountError(err: ParseAmountError) ![]u8 {
 }
 
 /// Check if a string has too much precision for given decimal places
+/// str is the string to check, precision is the number of decimal places
 fn isTooPrecise(str: []const u8, precision: usize) bool {
+    // If there is a decimal point, it is too precise
     if (std.mem.indexOf(u8, str, ".") != null) return true;
+    // If the precision is greater than the length of the string, it is too precise
     if (precision >= str.len) return true;
+    // Check if the last precision digits are zeroes
     var i: usize = 0;
     while (i < precision) : (i += 1) {
         if (str[str.len - 1 - i] != '0') return true;
@@ -116,20 +122,33 @@ fn parseSignedToSatoshi(str: []const u8, denom: Denomination) ParseAmountError!s
     if (str.len > 50) return ParseAmountError.InputTooLarge;
 
     const isNegative = str[0] == '-';
-    const valueStr = if (isNegative) str[1..] else str;
+    var valueStr = if (isNegative) str[1..] else str;
 
     if (valueStr.len == 0) return ParseAmountError.InvalidFormat;
 
     // Calculate maximum allowed decimals
+    // The difference in precision between native (satoshi)
+    // and desired denomination.
     const precisionDiff = -denom.precision();
-    const maxDecimals = if (precisionDiff < 0) blk: {
-        // Less precise denomination
-        const lastN = @as(usize, @intCast(-precisionDiff));
-        if (isTooPrecise(valueStr, lastN)) return ParseAmountError.TooPrecise;
-        break :blk 0;
-    } else precisionDiff;
 
+    const maxDecimals = if (precisionDiff < 0) blk: { // the condition is true when denom is milliSatoshi
+        // If precision diff is negative, this means we are parsing
+        // into a less precise amount. That is not allowed unless
+        // there are no decimals and the last digits are zeroes as
+        // many as the difference in precision.
+        // Less precise denomination
+        const lastN = @as(usize, @abs(precisionDiff));
+        // milliSatoshi --> convert to satoshi
+        // 1 msat = 0.001 satoshi, so we need to check if the last 3 digits are zeroes and no existing decimal point
+        // 1000 msat = 1 satoshi (satoshi is the smallest denomination, msat is only used for some sence, like lightning network)
+        if (isTooPrecise(valueStr, lastN)) return ParseAmountError.TooPrecise;
+        valueStr = valueStr[0..(valueStr.len - lastN)]; // ignore the last N digits, just like value / n*zeros
+        break :blk 0;
+    } else precisionDiff; // the condition is true when denom is not milliSatoshi
+
+    // Track the number of decimal places
     var decimals: ?usize = null;
+    // The value in satoshis
     var value: u64 = 0;
 
     for (valueStr) |c| {
@@ -143,10 +162,12 @@ fn parseSignedToSatoshi(str: []const u8, denom: Denomination) ParseAmountError!s
                 // Track decimal places
                 if (decimals) |d| {
                     if (d >= maxDecimals) return ParseAmountError.TooPrecise;
-                    decimals = d + 1;
+                    decimals = d + 1; // Warning: the condition is very important, it is used to check if the number of decimal places is too big
+                    // example: 123.456, maxDecimals = 2, d = 2, d + 1 = 3, 3 >= 2, 0.006 will be ingore, so it is too precise
+                    // 1BTC = 100,000,000 satoshi, so 0.00_000_000_1 BTC = 0.1 sat, satoshi is the smallest denomination, so it is too precise, 0.1sat is ignored
                 }
             },
-            '.' => {
+            '.' => { // Warning:  the condition  maybe is true when denom is not milliSatoshi
                 if (decimals != null) return ParseAmountError.InvalidFormat;
                 decimals = 0;
             },
@@ -158,7 +179,7 @@ fn parseSignedToSatoshi(str: []const u8, denom: Denomination) ParseAmountError!s
     const scale = @as(usize, @intCast(maxDecimals)) - @as(usize, @intCast(decimals orelse 0));
     var i: usize = 0;
     while (i < scale) : (i += 1) {
-        value = math.mul(u64, value, 10) catch return ParseAmountError.InputTooLarge;
+        value = math.mul(u64, value, 10) catch return ParseAmountError.TooBig;
     }
 
     return .{ isNegative, value };
@@ -289,7 +310,7 @@ pub const Amount = struct {
 
     /// Convert from float in given denomination
     pub fn fromFloatIn(value: f64, denom: Denomination) ParseAmountError!Amount {
-        if (value < 0.0) return error.Negative;
+        if (value < 0.0) return ParseAmountError.Negative;
 
         // Convert to string for safe parsing
         var buf: [32]u8 = undefined;
@@ -360,10 +381,10 @@ pub const Amount = struct {
     pub fn checkedDiv(self: Amount, scalar: anytype) ?Amount {
         switch (@TypeOf(scalar)) {
             u64 => {
-                return if (scalar == 0) null else Amount{ .value = @divFloor(self.value, scalar) };
+                return if (scalar == 0) null else Amount{ .value = math.divFloor(u64, self.value, scalar) catch return null };
             },
             Amount => {
-                return if (scalar.value == 0) null else Amount{ .value = @divFloor(self.value, scalar.value) };
+                return if (scalar.value == 0) null else Amount{ .value = math.divFloor(u64, self.value, scalar.value) catch return null };
             },
             else => {
                 @compileError("Expected u64 or Amount");
@@ -376,10 +397,10 @@ pub const Amount = struct {
     pub fn checkedRem(self: Amount, scalar: anytype) ?Amount {
         switch (@TypeOf(scalar)) {
             u64 => {
-                return if (scalar == 0) null else Amount{ .value = @rem(self.value, scalar) };
+                return if (scalar == 0) null else Amount{ .value = math.rem(u64, self.value, scalar) catch return null };
             },
             Amount => {
-                return if (scalar.value == 0) null else Amount{ .value = @mod(self.value, scalar.value) };
+                return if (scalar.value == 0) null else Amount{ .value = math.rem(u64, self.value, scalar.value) catch return null };
             },
             else => {
                 @compileError("Expected u64 or Amount");
@@ -480,14 +501,19 @@ pub const SignedAmount = struct {
     ///
     /// Please be aware of the risk of using floating-point numbers.
     pub fn fromFloatIn(value: f64, denom: Denomination) ParseAmountError!SignedAmount {
-        return SignedAmount.fromString(value, denom).toSigned();
+        var buf: [32]u8 = undefined;
+        const str = std.fmt.bufPrint(&buf, "{d}", .{value}) catch unreachable;
+        const sig = try SignedAmount.fromStrIn(str, denom);
+        return sig;
     }
 
     pub fn fromStrIn(str: []const u8, denom: Denomination) ParseAmountError!SignedAmount {
         const result = try parseSignedToSatoshi(str, denom);
-        if (result[1] > math.maxInt(i64)) return ParseAmountError.TooBig;
-        const value = @as(i64, @intCast(result[1]));
-        if (result[0]) return SignedAmount{ .value = -value };
+        const negative: bool = result[0];
+        const satoshi: u64 = result[1];
+        if (satoshi > math.maxInt(i64)) return ParseAmountError.TooBig;
+        const value = @as(i64, @intCast(satoshi));
+        if (negative) return SignedAmount{ .value = -value };
         return SignedAmount{ .value = value };
     }
 
@@ -591,10 +617,10 @@ pub const SignedAmount = struct {
     pub fn checkedDiv(self: SignedAmount, scalar: anytype) ?SignedAmount {
         switch (@TypeOf(scalar)) {
             i64 => {
-                return if (scalar == 0) null else SignedAmount{ .value = @divFloor(self.value, scalar) };
+                return if (scalar == 0) null else SignedAmount{ .value = math.divFloor(i64, self.value, scalar) catch return null };
             },
             SignedAmount => {
-                return if (scalar.value == 0) null else SignedAmount{ .value = @divFloor(self.value, scalar.value) };
+                return if (scalar.value == 0) null else SignedAmount{ .value = math.divFloor(i64, self.value, scalar.value) catch return null };
             },
             else => {
                 @compileError("Expected i64 or SignedAmount");
@@ -613,10 +639,10 @@ pub const SignedAmount = struct {
     pub fn checkedRem(self: SignedAmount, scalar: anytype) ?SignedAmount {
         switch (@TypeOf(scalar)) {
             i64 => {
-                return if (scalar == 0) null else SignedAmount{ .value = @rem(self.value, scalar) };
+                return if (scalar == 0) null else SignedAmount{ .value = math.rem(i64, self.value, scalar) catch return null };
             },
             SignedAmount => {
-                return if (scalar.value == 0) null else SignedAmount{ .value = @rem(self.value, scalar.value) };
+                return if (scalar.value == 0) null else SignedAmount{ .value = math.rem(i64, self.value, scalar.value) catch return null };
             },
             else => {
                 @compileError("Expected i64 or SignedAmount");
@@ -631,4 +657,51 @@ pub const SignedAmount = struct {
     pub fn remAssign(self: *SignedAmount, scalar: anytype) ParseAmountError!void {
         self.* = try self.rem(scalar);
     }
+
+    /// Subtraction that doesn't allow negative [SignedAmount]s.
+    /// Returns [None] if either [self], [rhs] or the result is strictly negative.
+    pub fn positiveSub(self: SignedAmount, rhs: SignedAmount) ?SignedAmount {
+        if (self.value < 0 or rhs.value < 0 or self.value - rhs.value < 0) return null;
+        return self.checkedSub(rhs);
+    }
+
+    // Some arithmetic that doesn't fit in `std::ops` traits.
+
+    /// Get the absolute value of this [SignedAmount].
+    pub fn abs(self: *const SignedAmount) SignedAmount {
+        return .{ .value = @abs(self.value) };
+    }
+
+    /// Returns a number representing sign of this [SignedAmount].
+    ///
+    /// - `0` if the amount is zero
+    /// - `1` if the amount is positive
+    /// - `-1` if the amount is negative
+    pub fn signum(self: *const SignedAmount) i64 {
+        return @divFloor(self.value, @abs(self.value));
+    }
+
+    /// Returns `true` if this [SignedAmount] is positive and `false` if
+    /// this [SignedAmount] is zero or negative.
+    pub fn isPositive(self: *const SignedAmount) bool {
+        return self.value > 0;
+    }
+
+    /// Returns `true` if this [SignedAmount] is negative and `false` if
+    /// this [SignedAmount] is zero or positive.
+    pub fn isNegative(self: *const SignedAmount) bool {
+        return self.value < 0;
+    }
+
+    /// Returns `true` if this [SignedAmount] is zero.
+    pub fn isZero(self: *const SignedAmount) bool {
+        return self.value == 0;
+    }
 };
+
+test "isTooPrecise" {
+    try std.testing.expect(isTooPrecise("123.456", 2));
+    try std.testing.expect(isTooPrecise("123.456", 3));
+    try std.testing.expect(isTooPrecise("123", 2));
+    try std.testing.expect(isTooPrecise("123.000001", 5));
+}
