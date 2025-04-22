@@ -55,6 +55,8 @@ test "checked_arithmetic" {
 }
 
 test "floating_point" {
+    var area = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer area.deinit();
     const f = Amount.fromFloatIn;
     const sf = SignedAmount.fromFloatIn;
     const sat = Amount.fromSat;
@@ -72,4 +74,37 @@ test "floating_point" {
     try std.testing.expectError(ParseAmountError.TooPrecise, sf(-100.0, .milliSatoshi));
     try std.testing.expectError(ParseAmountError.TooPrecise, f(42.123456781, .bitcoin));
     try std.testing.expectError(ParseAmountError.TooBig, sf(-184467440738.0, .bitcoin));
+    try std.testing.expectError(ParseAmountError.TooBig, f(18446744073709551617.0, .satoshi));
+    try std.testing.expectError(ParseAmountError.TooBig, f(SignedAmount.maxValue().toFloatIn(.satoshi) + 1.0, .satoshi));
+    // try std.testing.expectError(ParseAmountError.TooBig, f(Amount.maxValue().toFloatIn(.satoshi) + 1.0, .satoshi));
+
+    const btc = struct {
+        pub fn fromBTC(_: @This(), amount: f64) SignedAmount {
+            const fromBtc = SignedAmount.fromBtc(amount);
+            return fromBtc catch unreachable;
+        }
+    }{};
+
+    try std.testing.expectEqual(btc.fromBTC(2.5).toFloatIn(.bitcoin), 2.5);
+    try std.testing.expectEqual(btc.fromBTC(-2.5).toFloatIn(.milliBitcoin), -2500.0);
+    try std.testing.expectEqual(btc.fromBTC(2.5).toFloatIn(.satoshi), 250000000.0);
+    try std.testing.expectEqual(btc.fromBTC(-2.5).toFloatIn(.satoshi), -250000000.0);
+
+    const unsigned = struct {
+        pub fn fromBTC(_: @This(), amount: f64) Amount {
+            const fromBtc = Amount.fromBtc(amount);
+            return fromBtc catch unreachable;
+        }
+    }{};
+    const v = try unsigned.fromBTC(0.0012).toFloatIn(area.allocator(), .bitcoin);
+    const str = try std.fmt.allocPrint(area.allocator(), "{d}", .{v});
+    try std.testing.expectEqualSlices(u8, str, "0.0012");
 }
+
+// test "format_satoshi_in" {
+//     // {[argument] [specifier]:[fill][alignment][width][precision].[precision]}
+//     const n = 10;
+//     const zeroPadded = [_]u8{'0'} ** n;
+//     const str = "{d}{s}\n";
+//     std.debug.print(str, .{ 124, zeroPadded });
+// }

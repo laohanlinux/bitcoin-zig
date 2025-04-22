@@ -156,8 +156,8 @@ fn parseSignedToSatoshi(str: []const u8, denom: Denomination) ParseAmountError!s
             '0'...'9' => {
                 // value = 10 * value + digit
                 const digit = c - '0';
-                value = math.mul(u64, value, 10) catch return ParseAmountError.InputTooLarge;
-                value = math.add(u64, value, digit) catch return ParseAmountError.InputTooLarge;
+                value = math.mul(u64, value, 10) catch return ParseAmountError.TooBig;
+                value = math.add(u64, value, digit) catch return ParseAmountError.TooBig;
 
                 // Track decimal places
                 if (decimals) |d| {
@@ -186,36 +186,45 @@ fn parseSignedToSatoshi(str: []const u8, denom: Denomination) ParseAmountError!s
 }
 
 /// Format satoshi amount in given denomination
-fn formatSatoshiIn(
+pub fn formatSatoshiIn(
     allocator: std.mem.Allocator,
     satoshi: u64,
     negative: bool,
     denom: Denomination,
 ) ParseAmountError![]u8 {
-    var buf = std.ArrayList(u8).init(allocator);
+    var buf = std.ArrayList(u8).initCapacity(allocator, 32) catch unreachable;
     errdefer buf.deinit();
-
     if (negative) {
-        try buf.append('-');
+        buf.append('-') catch unreachable;
     }
 
     const precision = denom.precision();
-    switch (std.math.order(0, precision)) {
+    std.debug.print("satoshi: {d}, precision: {d}\n", .{ satoshi, precision });
+    switch (std.math.order(precision, 0)) {
         .gt => {
+            std.debug.print("precision: {d}\n", .{precision});
             // Add zeros at end
             const width = @as(usize, @intCast(precision));
-            fmt.format(buf.writer(), "{d}{d:0>{}}", .{ satoshi, 0, width }) catch unreachable;
+            const zeroPadded = [_]u8{'0'} ** 8;
+            std.debug.assert(width <= 8);
+            std.fmt.format(buf.writer(), "{d}{s}", .{ satoshi, zeroPadded[0..width] }) catch unreachable;
         },
         .lt => {
             // Insert decimal point
-            const nbDecimals = @as(usize, @intCast(-precision));
-            const str = fmt.allocPrint(allocator, "{d:0>{}}", .{ satoshi, nbDecimals }) catch unreachable;
-            defer allocator.free(str);
-
-            if (str.len == nbDecimals) {
-                fmt.format(buf.writer(), "0.{s}", .{str}) catch unreachable;
+            const nbDecimals = @as(u64, @abs(precision));
+            // Convert number to string with padding
+            const formatStr = std.fmt.allocPrint(allocator, "{d}", .{satoshi}) catch unreachable;
+            defer allocator.free(formatStr);
+            if (formatStr.len <= nbDecimals) {
+                buf.appendSlice("0.") catch unreachable;
+                buf.appendNTimes('0', (nbDecimals - formatStr.len)) catch unreachable;
+                buf.appendSlice(formatStr) catch unreachable;
             } else {
-                fmt.format(buf.writer(), "{s}.{s}", .{ str[0 .. str.len - nbDecimals], str[str.len - nbDecimals ..] }) catch unreachable;
+                const integerPart = formatStr[0 .. formatStr.len - nbDecimals];
+                const decimalPart = formatStr[formatStr.len - nbDecimals ..];
+                buf.appendSlice(integerPart) catch unreachable;
+                buf.append('.') catch unreachable;
+                buf.appendSlice(decimalPart) catch unreachable;
             }
         },
         .eq => {
@@ -265,16 +274,18 @@ pub const Amount = struct {
     }
 
     /// Convert to BTC value
-    pub fn asBtc(self: Amount) f64 {
-        return self.toFloatIn(.bitcoin);
+    pub inline fn asBtc(self: Amount, allocator: std.mem.Allocator) ParseAmountError!f64 {
+        return self.toFloatIn(allocator, .bitcoin);
     }
 
     /// Parse amount string with denomination
     pub fn fromString(str: []const u8, denom: Denomination) ParseAmountError!Amount {
         const result = try parseSignedToSatoshi(str, denom);
-        if (result[0]) return ParseAmountError.Negative;
-        if (result[1] > math.maxInt(i64)) return ParseAmountError.TooBig;
-        return Amount{ .value = result[1] };
+        const negative: bool = result[0];
+        const satoshi: u64 = result[1];
+        if (negative) return ParseAmountError.Negative;
+        if (satoshi > math.maxInt(i64)) return ParseAmountError.TooBig;
+        return Amount{ .value = satoshi };
     }
 
     /// Parses amounts with denomination suffix like they are produced with
@@ -303,9 +314,19 @@ pub const Amount = struct {
     }
 
     /// Convert to float in given denomination
-    pub fn toFloatIn(self: Amount, denom: Denomination) f64 {
-        const precision = @as(f64, @floatCast(denom.precision()));
-        return @as(f64, @floatCast(self.value)) * std.math.pow(f64, 10, precision);
+    pub inline fn toFloatIn(self: Amount, allocator: std.mem.Allocator, denom: Denomination) ParseAmountError!f64 {
+        const str = try self.toStringIn(allocator, denom);
+        return std.fmt.parseFloat(f64, str) catch unreachable;
+    }
+
+    /// Convert to string in given denomination
+    pub inline fn toStringIn(self: Amount, allocator: std.mem.Allocator, denom: Denomination) ParseAmountError![]u8 {
+        const str = try self.fmtValueIn(allocator, denom);
+        return str;
+    }
+
+    pub fn fmtValueIn(self: Amount, allocator: std.mem.Allocator, denom: Denomination) ParseAmountError![]u8 {
+        return formatSatoshiIn(allocator, self.value, false, denom);
     }
 
     /// Convert from float in given denomination
@@ -503,6 +524,7 @@ pub const SignedAmount = struct {
     pub fn fromFloatIn(value: f64, denom: Denomination) ParseAmountError!SignedAmount {
         var buf: [32]u8 = undefined;
         const str = std.fmt.bufPrint(&buf, "{d}", .{value}) catch unreachable;
+        std.debug.print("str: {s}\n", .{str});
         const sig = try SignedAmount.fromStrIn(str, denom);
         return sig;
     }
@@ -529,9 +551,10 @@ pub const SignedAmount = struct {
         return fromStrIn(amtStr, denom);
     }
 
+    /// Convert to float in given denomination
     pub fn toFloatIn(self: SignedAmount, denom: Denomination) f64 {
-        const precision = @as(f64, @floatCast(denom.precision()));
-        return @as(f64, @floatCast(self.value)) * std.math.pow(f64, 10, precision);
+        const precision = @as(f64, @floatFromInt(denom.precision()));
+        return @as(f64, @floatFromInt(self.value)) * std.math.pow(f64, 10, precision);
     }
 
     /// Convert to unsigned amount
@@ -558,14 +581,19 @@ pub const SignedAmount = struct {
         }
     }
 
+    /// Checked addition.
+    /// Returns [None] if overflow occurred.
     pub fn add(self: SignedAmount, other: anytype) ParseAmountError!SignedAmount {
         return self.checkedAdd(other) orelse ParseAmountError.Overflow;
     }
 
+    /// Add assign.
     pub fn addAssign(self: *SignedAmount, other: anytype) ParseAmountError!void {
         self.* = try self.add(other);
     }
 
+    /// Checked subtraction.
+    /// Returns [None] if overflow occurred.
     pub fn checkedSub(self: SignedAmount, other: anytype) ?SignedAmount {
         switch (@TypeOf(other)) {
             i64 => {
@@ -582,14 +610,18 @@ pub const SignedAmount = struct {
         }
     }
 
+    /// Subtraction.
     pub fn sub(self: SignedAmount, other: anytype) ParseAmountError!SignedAmount {
         return self.checkedSub(other) orelse ParseAmountError.Overflow;
     }
 
+    /// Subtraction assign.
     pub fn subAssign(self: *SignedAmount, other: anytype) ParseAmountError!void {
         self.* = try self.sub(other);
     }
 
+    /// Checked multiplication.
+    /// Returns [None] if overflow occurred.
     pub fn checkedMul(self: SignedAmount, scalar: anytype) ?SignedAmount {
         switch (@TypeOf(scalar)) {
             i64 => {
@@ -606,14 +638,18 @@ pub const SignedAmount = struct {
         }
     }
 
+    /// Multiplication.
     pub fn mul(self: SignedAmount, scalar: anytype) ParseAmountError!SignedAmount {
         return self.checkedMul(scalar) orelse ParseAmountError.Overflow;
     }
 
+    /// Multiplication assign.
     pub fn mulAssign(self: *SignedAmount, scalar: anytype) ParseAmountError!void {
         self.* = try self.mul(scalar);
     }
 
+    /// Checked division.
+    /// Returns [None] if overflow occurred.
     pub fn checkedDiv(self: SignedAmount, scalar: anytype) ?SignedAmount {
         switch (@TypeOf(scalar)) {
             i64 => {
@@ -628,14 +664,18 @@ pub const SignedAmount = struct {
         }
     }
 
+    /// Division.
     pub fn div(self: SignedAmount, scalar: anytype) ParseAmountError!SignedAmount {
         return self.checkedDiv(scalar) orelse ParseAmountError.Overflow;
     }
 
+    /// Division assign.
     pub fn divAssign(self: *SignedAmount, scalar: anytype) ParseAmountError!void {
         self.* = try self.div(scalar);
     }
 
+    /// Checked remainder.
+    /// Returns [None] if overflow occurred.
     pub fn checkedRem(self: SignedAmount, scalar: anytype) ?SignedAmount {
         switch (@TypeOf(scalar)) {
             i64 => {
@@ -650,10 +690,12 @@ pub const SignedAmount = struct {
         }
     }
 
+    /// Remainder.
     pub fn rem(self: SignedAmount, scalar: anytype) ParseAmountError!SignedAmount {
         return self.checkedRem(scalar) orelse ParseAmountError.Overflow;
     }
 
+    /// Remainder assign.
     pub fn remAssign(self: *SignedAmount, scalar: anytype) ParseAmountError!void {
         self.* = try self.rem(scalar);
     }
