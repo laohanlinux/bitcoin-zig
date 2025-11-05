@@ -7,6 +7,6 @@ pub const hashtypes = @import("hashtypes/lib.zig");
 pub const hashes = @import("hashes/lib.zig");
 
 test {
-    // _ = @import("network/address_test.zig");
+    _ = @import("network/address_test.zig");
     _ = @import("util/amount_test.zig");
 }

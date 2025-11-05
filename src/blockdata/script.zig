@@ -427,6 +427,7 @@ pub const Instructions = struct {
 
 /// Script builder using the builder pattern
 pub const Builder = struct {
+    allocator: std.mem.Allocator,
     bytes: std.ArrayList(u8),
     last_op: ?opcodes.All,
 
@@ -435,7 +436,8 @@ pub const Builder = struct {
     /// Create a new empty script builder
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .bytes = std.ArrayList(u8).init(allocator),
+            .allocator = allocator,
+            .bytes = .empty,
             .last_op = null,
         };
     }
@@ -473,8 +475,8 @@ pub const Builder = struct {
 
     /// Push integer using explicit encoding
     pub fn pushScriptint(self: *Self, data: i64) *Self {
-        const int_bytes = buildScriptint(self.bytes.allocator, data) catch unreachable;
-        defer self.bytes.allocator.free(int_bytes);
+        const int_bytes = buildScriptint(self.allocator, data) catch unreachable;
+        defer self.allocator.free(int_bytes);
         return self.pushSlice(int_bytes);
     }
 
@@ -482,35 +484,35 @@ pub const Builder = struct {
     pub fn pushSlice(self: *Self, data: []const u8) *Self {
         // Start with PUSH opcode
         switch (data.len) {
-            0...75 => self.bytes.append(@as(u8, @intCast(data.len))) catch unreachable,
+            0...75 => self.bytes.append(self.allocator, @as(u8, @intCast(data.len))) catch unreachable,
             76...255 => {
-                self.bytes.append(opcodes.Ordinary.OP_PUSHDATA1.into_u8()) catch unreachable;
-                self.bytes.append(@as(u8, @intCast(data.len))) catch unreachable;
+                self.bytes.append(self.allocator, opcodes.Ordinary.OP_PUSHDATA1.into_u8()) catch unreachable;
+                self.bytes.append(self.allocator, @as(u8, @intCast(data.len))) catch unreachable;
             },
             256...65535 => {
-                self.bytes.append(opcodes.Ordinary.OP_PUSHDATA2.into_u8()) catch unreachable;
-                self.bytes.append(@as(u8, @intCast(data.len & 0xFF))) catch unreachable;
-                self.bytes.append(@as(u8, @intCast((data.len >> 8) & 0xFF))) catch unreachable;
+                self.bytes.append(self.allocator, opcodes.Ordinary.OP_PUSHDATA2.into_u8()) catch unreachable;
+                self.bytes.append(self.allocator, @as(u8, @intCast(data.len & 0xFF))) catch unreachable;
+                self.bytes.append(self.allocator, @as(u8, @intCast((data.len >> 8) & 0xFF))) catch unreachable;
             },
             65536...4294967295 => {
-                self.bytes.append(opcodes.Ordinary.OP_PUSHDATA4.into_u8()) catch unreachable;
-                self.bytes.append(@as(u8, @intCast(data.len & 0xFF))) catch unreachable;
-                self.bytes.append(@as(u8, @intCast((data.len >> 8) & 0xFF))) catch unreachable;
-                self.bytes.append(@as(u8, @intCast((data.len >> 16) & 0xFF))) catch unreachable;
-                self.bytes.append(@as(u8, @intCast((data.len >> 24) & 0xFF))) catch unreachable;
+                self.bytes.append(self.allocator, opcodes.Ordinary.OP_PUSHDATA4.into_u8()) catch unreachable;
+                self.bytes.append(self.allocator, @as(u8, @intCast(data.len & 0xFF))) catch unreachable;
+                self.bytes.append(self.allocator, @as(u8, @intCast((data.len >> 8) & 0xFF))) catch unreachable;
+                self.bytes.append(self.allocator, @as(u8, @intCast((data.len >> 16) & 0xFF))) catch unreachable;
+                self.bytes.append(self.allocator, @as(u8, @intCast((data.len >> 24) & 0xFF))) catch unreachable;
             },
             else => @panic("tried to put a 4bn+ sized object into a script!"),
         }
 
         // Then push the raw bytes
-        self.bytes.appendSlice(data) catch unreachable;
+        self.bytes.appendSlice(self.allocator, data) catch unreachable;
         self.last_op = null;
         return self;
     }
 
     /// Adds a single opcode to the script
     pub fn pushOpcode(self: *Self, data: opcodes.All) *Self {
-        self.bytes.append(data.into_u8()) catch unreachable;
+        self.bytes.append(self.allocator, data.into_u8()) catch unreachable;
         self.last_op = data;
         return self;
     }
@@ -541,16 +543,16 @@ pub const Builder = struct {
 
     /// Convert the Builder into a Script
     pub fn build(self: *Self) Script {
-        const bytes = self.bytes.toOwnedSlice() catch unreachable;
+        const bytes = self.bytes.toOwnedSlice(self.allocator) catch unreachable;
         return Script{
             .bytes = bytes,
-            .allocator = self.bytes.allocator,
+            .allocator = self.allocator,
         };
     }
 
     /// Free resources used by the builder
     pub fn deinit(self: *Self) void {
-        self.bytes.deinit();
+        self.bytes.deinit(self.allocator);
     }
 };
 
@@ -561,27 +563,27 @@ fn buildScriptint(allocator: std.mem.Allocator, n: i64) ![]u8 {
     const neg = n < 0;
     var abs: u64 = if (neg) @as(u64, @intCast(-n)) else @as(u64, @intCast(n));
 
-    var list = std.ArrayList(u8).init(allocator);
-    errdefer list.deinit();
+    var list: std.ArrayList(u8) = .empty;
+    errdefer list.deinit(allocator);
 
     while (abs > 0xFF) {
-        try list.append(@as(u8, @intCast(abs & 0xFF)));
+        try list.append(allocator, @as(u8, @intCast(abs & 0xFF)));
         abs >>= 8;
     }
 
     // If the number's value causes the sign bit to be set, we need an extra
     // byte to get the correct value and correct sign bit
     if (abs & 0x80 != 0) {
-        try list.append(@as(u8, @intCast(abs)));
-        try list.append(if (neg) 0x80 else 0x00);
+        try list.append(allocator, @as(u8, @intCast(abs)));
+        try list.append(allocator, if (neg) 0x80 else 0x00);
     }
     // Otherwise we just set the sign bit ourselves
     else {
         abs |= if (neg) 0x80 else 0x00;
-        try list.append(@as(u8, @intCast(abs)));
+        try list.append(allocator, @as(u8, @intCast(abs)));
     }
 
-    return list.toOwnedSlice();
+    return list.toOwnedSlice(allocator);
 }
 
 /// Helper to decode an integer in script format
@@ -650,47 +652,48 @@ fn readUint(data: []const u8, size: usize) !usize {
 }
 
 test "script" {
-    var comp = std.ArrayList(u8).init(std.testing.allocator);
-    defer comp.deinit();
-    var script = Builder.init(std.testing.allocator);
+    const allocator = std.testing.allocator;
+    var comp: std.ArrayList(u8) = .empty;
+    defer comp.deinit(allocator);
+    var script = Builder.init(allocator);
     defer script.deinit();
     try std.testing.expectEqual(script.bytes.items, comp.items);
 
     // small ints
     {
         _ = script.pushInt(1);
-        _ = try comp.append(81);
+        _ = try comp.append(allocator, 81);
         try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
         _ = script.pushInt(0);
-        _ = try comp.append(0x00);
+        _ = try comp.append(allocator, 0x00);
         try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
         _ = script.pushInt(4);
-        _ = try comp.append(84);
+        _ = try comp.append(allocator, 84);
         try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
         _ = script.pushInt(-1);
-        _ = try comp.append(79);
+        _ = try comp.append(allocator, 79);
         try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
         // forced scriptint
         _ = script.pushScriptint(4);
-        _ = try comp.appendSlice(&[_]u8{ 1, 4 });
+        _ = try comp.appendSlice(allocator, &[_]u8{ 1, 4 });
         try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
         // big ints
         _ = script.pushScriptint(17);
-        _ = try comp.appendSlice(&[_]u8{ 1, 17 });
+        _ = try comp.appendSlice(allocator, &[_]u8{ 1, 17 });
         try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
         _ = script.pushScriptint(10000);
-        _ = try comp.appendSlice(&[_]u8{ 2, 16, 39 });
+        _ = try comp.appendSlice(allocator, &[_]u8{ 2, 16, 39 });
         try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
         // notice the sign bit set here, hence the extra zero/128 at the end
         _ = script.pushScriptint(10000000);
-        _ = try comp.appendSlice(&[_]u8{ 4, 128, 150, 152, 0 });
+        _ = try comp.appendSlice(allocator, &[_]u8{ 4, 128, 150, 152, 0 });
         try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
         _ = script.pushScriptint(-10000000);
-        _ = try comp.appendSlice(&[_]u8{ 4, 128, 150, 152, 128 });
+        _ = try comp.appendSlice(allocator, &[_]u8{ 4, 128, 150, 152, 128 });
         try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
         // data
         _ = script.pushSlice("NRA4VR");
-        _ = try comp.appendSlice(&[_]u8{ 6, 78, 82, 65, 52, 86, 82 });
+        _ = try comp.appendSlice(allocator, &[_]u8{ 6, 78, 82, 65, 52, 86, 82 });
         try std.testing.expectEqualSlices(u8, script.bytes.items, comp.items);
         // keys
     }
