@@ -186,28 +186,29 @@ fn parseSignedToSatoshi(str: []const u8, denom: Denomination) ParseAmountError!s
 }
 
 /// Format satoshi amount in given denomination
-pub fn formatSatoshiIn(
+pub inline fn formatSatoshiIn(
     allocator: std.mem.Allocator,
     satoshi: u64,
     negative: bool,
     denom: Denomination,
 ) ParseAmountError![]u8 {
-    var buf = std.ArrayList(u8).initCapacity(allocator, 32) catch unreachable;
-    errdefer buf.deinit();
+    // allocate 32 bytes for buffer.
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+    // If negative, prepend a minus sign
     if (negative) {
-        buf.append('-') catch unreachable;
+        buf.append(allocator, '-') catch unreachable;
     }
 
     const precision = denom.precision();
-    std.debug.print("satoshi: {d}, precision: {d}\n", .{ satoshi, precision });
+    // std.debug.print("satoshi: {d}, precision: {d}\n", .{ satoshi, precision });
     switch (std.math.order(precision, 0)) {
         .gt => {
-            std.debug.print("precision: {d}\n", .{precision});
             // Add zeros at end
+            buf.print(allocator, "{d}", .{satoshi}) catch unreachable;
             const width = @as(usize, @intCast(precision));
-            const zeroPadded = [_]u8{'0'} ** 8;
             std.debug.assert(width <= 8);
-            std.fmt.format(buf.writer(), "{d}{s}", .{ satoshi, zeroPadded[0..width] }) catch unreachable;
+            buf.appendNTimes(allocator, '0', width) catch unreachable;
         },
         .lt => {
             // Insert decimal point
@@ -216,25 +217,22 @@ pub fn formatSatoshiIn(
             const formatStr = std.fmt.allocPrint(allocator, "{d}", .{satoshi}) catch unreachable;
             defer allocator.free(formatStr);
             if (formatStr.len <= nbDecimals) {
-                buf.appendSlice("0.") catch unreachable;
-                buf.appendNTimes('0', (nbDecimals - formatStr.len)) catch unreachable;
-                buf.appendSlice(formatStr) catch unreachable;
+                buf.appendSlice(allocator, "0.") catch unreachable;
+                buf.appendNTimes(allocator, '0', (nbDecimals - formatStr.len)) catch unreachable;
+                buf.appendSlice(allocator, formatStr) catch unreachable;
             } else {
                 const integerPart = formatStr[0 .. formatStr.len - nbDecimals];
                 const decimalPart = formatStr[formatStr.len - nbDecimals ..];
-                buf.appendSlice(integerPart) catch unreachable;
-                buf.append('.') catch unreachable;
-                buf.appendSlice(decimalPart) catch unreachable;
+                buf.appendSlice(allocator, integerPart) catch unreachable;
+                buf.append(allocator, '.') catch unreachable;
+                buf.appendSlice(allocator, decimalPart) catch unreachable;
             }
         },
         .eq => {
-            fmt.format(buf.writer(), "{d}", .{satoshi}) catch unreachable;
+            buf.print(allocator, "{d}", .{satoshi}) catch unreachable;
         },
     }
-
-    const result = buf.toOwnedSlice() catch unreachable;
-    buf.deinit();
-    return result;
+    return buf.toOwnedSlice(allocator) catch unreachable;
 }
 
 /// Amount type that can be used to express Bitcoin amounts
@@ -292,7 +290,7 @@ pub const Amount = struct {
     /// [to_string_with_denomination] or with [fmt::Display].
     /// If you want to parse only the amount without the denomination,
     /// use [from_str_in].
-    pub fn fromStrWithDenomination(str: []const u8) ParseAmountError!Amount {
+    pub inline fn fromStrWithDenomination(str: []const u8) ParseAmountError!Amount {
         const split = std.mem.splitSequence(u8, str, ' ');
         const amt_str = split.next() orelse return ParseAmountError.InvalidFormat;
         const denom_str = split.next() orelse return ParseAmountError.InvalidFormat;
@@ -301,12 +299,12 @@ pub const Amount = struct {
     }
 
     /// Format amount in given denomination
-    pub fn formatValue(self: Amount, allocator: std.mem.Allocator, denom: Denomination) ParseAmountError![]u8 {
+    pub inline fn formatValue(self: Amount, allocator: std.mem.Allocator, denom: Denomination) ParseAmountError![]u8 {
         return formatSatoshiIn(self.value, false, allocator, denom);
     }
 
     /// Format amount with denomination
-    pub fn toString(self: Amount, allocator: std.mem.Allocator, denom: Denomination) ParseAmountError![]u8 {
+    pub inline fn toString(self: Amount, allocator: std.mem.Allocator, denom: Denomination) ParseAmountError![]u8 {
         const value = try self.formatValue(allocator, denom);
         defer allocator.free(value);
 
@@ -325,12 +323,12 @@ pub const Amount = struct {
         return str;
     }
 
-    pub fn fmtValueIn(self: Amount, allocator: std.mem.Allocator, denom: Denomination) ParseAmountError![]u8 {
+    pub inline fn fmtValueIn(self: Amount, allocator: std.mem.Allocator, denom: Denomination) ParseAmountError![]u8 {
         return formatSatoshiIn(allocator, self.value, false, denom);
     }
 
     /// Convert from float in given denomination
-    pub fn fromFloatIn(value: f64, denom: Denomination) ParseAmountError!Amount {
+    pub inline fn fromFloatIn(value: f64, denom: Denomination) ParseAmountError!Amount {
         if (value < 0.0) return ParseAmountError.Negative;
 
         // Convert to string for safe parsing
@@ -524,7 +522,7 @@ pub const SignedAmount = struct {
     pub fn fromFloatIn(value: f64, denom: Denomination) ParseAmountError!SignedAmount {
         var buf: [32]u8 = undefined;
         const str = std.fmt.bufPrint(&buf, "{d}", .{value}) catch unreachable;
-        std.debug.print("str: {s}\n", .{str});
+        // std.debug.print("str: {s}\n", .{str});
         const sig = try SignedAmount.fromStrIn(str, denom);
         return sig;
     }
