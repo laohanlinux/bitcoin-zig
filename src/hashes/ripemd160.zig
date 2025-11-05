@@ -53,6 +53,12 @@ pub const Ripemd160 = struct {
 
         return res;
     }
+
+    /// convert bytes to hex string
+    pub inline fn bytesToHex(self: Ripemd160, case: std.fmt.Case) []const u8 {
+        const hexStr = std.fmt.bytesToHex(self.bytes[0..], case);
+        return hexStr[0..hexStr.len];
+    }
 };
 
 fn compress(hash: *[5]u32, words: [16]u32) void {
@@ -147,10 +153,8 @@ fn bfn5(x: u32, y: u32, z: u32) u32 {
 }
 
 fn testHashEql(expected: []const u8, in: []const u8) !void {
-    const hash = Ripemd160.hash(in);
-    var hex_str: [40]u8 = undefined;
-    _ = try std.fmt.bufPrint(&hex_str, "{x}", .{std.fmt.fmtSliceHexLower(hash.bytes[0..])});
-    try std.testing.expectEqualSlices(u8, expected, hex_str[0..]);
+    const hexStr = Ripemd160.hash(in).bytesToHex(.lower);
+    try std.testing.expectEqualSlices(u8, expected, hexStr[0..]);
 }
 
 test "RIPEMD-160 standard tests" {

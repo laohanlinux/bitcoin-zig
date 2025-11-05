@@ -75,18 +75,15 @@ fn Ripemd160() type {
 }
 
 /// Convert a slice of bytes to a hex string.
-pub inline fn hex(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
-    const hex_str = try std.fmt.allocPrint(allocator, "{x}", .{std.fmt.fmtSliceHexLower(data[0..])});
-    return hex_str;
+pub fn hex(data: anytype) ![data.len * 2]u8 {
+    const hexStr = std.fmt.bytesToHex(data, .lower);
+    return hexStr;
 }
 
 /// Parse a hex string into a slice of bytes.
-pub inline fn parseHexBytes(allocator: std.mem.Allocator, hexStr: []const u8) []u8 {
-    var bytes = allocator.alloc(u8, hexStr.len / 2) catch unreachable;
-    var i: usize = 0;
-    while (i < hexStr.len) : (i += 2) {
-        bytes[i / 2] = std.fmt.parseInt(u8, hexStr[i .. i + 2], 16) catch unreachable;
-    }
+pub inline fn parseHexBytes(allocator: std.mem.Allocator, hexStr: []const u8) ![]u8 {
+    const bytes = allocator.alloc(u8, hexStr.len / 2) catch unreachable;
+    _ = std.fmt.hexToBytes(bytes, hexStr) catch unreachable;
     return bytes;
 }
 
@@ -222,9 +219,8 @@ test "hash engine" {
     engine.finish(&hash); // Pass the address of the hash array
 
     // Print the hash in hexadecimal format
-    const hex_hash = try hex(std.testing.allocator, &hash);
-    defer std.testing.allocator.free(hex_hash);
-    // std.debug.print("hash: {s}\n", .{hex_hash});
+    const hex_hash = try hex(&hash);
+    std.debug.print("hash: {s}\n", .{hex_hash});
 
     // Create expected hash for comparison
     var expected: [32]u8 = undefined;
@@ -242,15 +238,14 @@ test "sha256d" {
     engine.update(message);
     var hash: [32]u8 = undefined;
     engine.finish(&hash);
-    const hex_hash = try hex(std.testing.allocator, &hash);
-    defer std.testing.allocator.free(hex_hash);
+    const hexHash = try hex(&hash);
+    std.debug.print("{s}\n", .{hexHash});
 }
 
 test "ripemd160" {
     const message = "message digest";
     var hash: [20]u8 = undefined;
     HashEngine(HashType.ripemd160).hash(message, &hash);
-    const hex_hash = try hex(std.testing.allocator, &hash);
-    defer std.testing.allocator.free(hex_hash);
-    try std.testing.expectEqualSlices(u8, "5d0689ef49d2fae572b881b123a85ffa21595f36", hex_hash);
+    const hexHash = try hex(&hash);
+    try std.testing.expectEqualSlices(u8, "5d0689ef49d2fae572b881b123a85ffa21595f36", hexHash);
 }
