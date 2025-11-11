@@ -7,9 +7,10 @@ pub fn main() !void {
     std.debug.print("Run `zig build test` to run the tests.\n", .{});
 }
 
-// test "simple test" {
-//     var list = std.ArrayList(i32).init(std.testing.allocator);
-//     defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-//     try list.append(42);
-//     try std.testing.expectEqual(@as(i32, 42), list.pop());
-// }
+test "simple test" {
+    var list: std.ArrayList(i32) = .empty;
+    defer list.deinit(std.testing.allocator); // try commenting this out and see if zig detects the memory leak!
+    try list.append(std.testing.allocator, 42);
+    const item = list.pop().?;
+    std.debug.print("item is {}\n", .{item});
+}

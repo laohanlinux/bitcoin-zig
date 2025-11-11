@@ -148,15 +148,16 @@ pub const Address = struct {
     }
 
     pub inline fn toJson(self: Address, allocator: std.mem.Allocator) ![]u8 {
-        var wt = std.Io.Writer.Allocating.init(allocator).writer;
-        std.json.Stringify.value(struct {
+        var allocating = std.Io.Writer.Allocating.init(allocator);
+        const writer = &allocating.writer;
+        try std.json.Stringify.value(struct {
             payload: Payload,
             network: Network,
         }{
             .payload = self.payload,
             .network = self.network,
-        }, .{}, &wt) catch unreachable;
-        return wt.buffer;
+        }, .{}, writer);
+        return try allocating.toOwnedSlice();
     }
 
     /// Creates a pay to (compressed) public key hash address from a public key

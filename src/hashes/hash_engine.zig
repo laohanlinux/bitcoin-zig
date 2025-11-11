@@ -75,9 +75,15 @@ fn Ripemd160() type {
 }
 
 /// Convert a slice of bytes to a hex string.
-pub fn hex(data: anytype) ![data.len * 2]u8 {
-    const hexStr = std.fmt.bytesToHex(data, .lower);
-    return hexStr;
+pub inline fn hex(data: []const u8) ![]u8 {
+    var result: [1024]u8 = undefined;
+    var i: usize = 0;
+    while (i < data.len) : (i += 1) {
+        const byte = data[i];
+        result[i * 2 + 0] = std.fmt.hex_charset[byte >> 4];
+        result[i * 2 + 1] = std.fmt.hex_charset[byte & 15];
+    }
+    return result[0 .. data.len * 2];
 }
 
 /// Parse a hex string into a slice of bytes.
@@ -246,6 +252,7 @@ test "ripemd160" {
     const message = "message digest";
     var hash: [20]u8 = undefined;
     HashEngine(HashType.ripemd160).hash(message, &hash);
+    std.debug.print("RIPEMD-160:  {any}", .{hash});
     const hexHash = try hex(&hash);
     try std.testing.expectEqualSlices(u8, "5d0689ef49d2fae572b881b123a85ffa21595f36", hexHash);
 }
