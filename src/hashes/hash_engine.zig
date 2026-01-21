@@ -75,9 +75,20 @@ fn Ripemd160() type {
 }
 
 /// Convert a slice of bytes to a hex string.
-pub fn hex(data: anytype) ![data.len * 2]u8 {
-    const hexStr = std.fmt.bytesToHex(data, .lower);
-    return hexStr;
+/// For comptime-known length data (arrays or pointers to arrays).
+pub fn hex(data: anytype) [data.len * 2]u8 {
+    return std.fmt.bytesToHex(data, .lower);
+}
+
+/// Convert a runtime-length slice of bytes to a hex string.
+/// Caller owns the returned memory.
+pub fn hexAlloc(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
+    const result = try allocator.alloc(u8, data.len * 2);
+    for (data, 0..) |byte, i| {
+        result[i * 2] = std.fmt.digitToChar(byte >> 4, .lower);
+        result[i * 2 + 1] = std.fmt.digitToChar(byte & 0x0f, .lower);
+    }
+    return result;
 }
 
 /// Parse a hex string into a slice of bytes.
@@ -175,34 +186,88 @@ pub fn HashEngine(h: HashType) type {
 }
 
 pub fn Hash(h: HashType) type {
-    return struct {
-        buf: [
-            switch (h) {
-                .sha256 => 32,
-                .sha256d => 32,
-                .ripemd160 => 20,
-                .sha512 => 64,
-                .hash160 => 20,
-            }
-        ]u8 = [1]u8{0} ** switch (h) {
-            .sha256 => 32,
-            .sha256d => 32,
-            .ripemd160 => 20,
-            .sha512 => 64,
-            .hash160 => 20,
-        },
-        h: HashEngine(h),
+    const digest_size = switch (h) {
+        .sha256 => 32,
+        .sha256d => 32,
+        .ripemd160 => 20,
+        .sha512 => 64,
+        .hash160 => 20,
+    };
 
-        pub fn init() @This() {
-            return .{ .h = HashEngine(h).init(.{}) };
+    return struct {
+        buf: [digest_size]u8 = [1]u8{0} ** digest_size,
+        hasher: HashEngine(h),
+
+        const Self = @This();
+
+        /// The size of the hash output in bytes
+        pub const DIGEST_SIZE: usize = digest_size;
+
+        /// Create a new hash with zero buffer
+        pub fn init() Self {
+            return Self{ .hasher = HashEngine(h).init(.{}) };
         }
 
+        /// Create a hash engine for incremental hashing
         pub fn engine() HashEngine(h) {
             return HashEngine(h).init(.{});
         }
 
-        pub fn fromSlice(_: []const u8) @This() {
-            @panic("not implemented");
+        /// Create a hash from a byte slice
+        /// Returns null if the slice length doesn't match the expected hash size
+        pub fn fromSlice(slice: []const u8) ?Self {
+            if (slice.len != digest_size) {
+                return null;
+            }
+            var result = Self{ .hasher = HashEngine(h).init(.{}) };
+            @memcpy(&result.buf, slice);
+            return result;
+        }
+
+        /// Create a hash from a byte array
+        pub fn fromBytes(bytes: [digest_size]u8) Self {
+            var result = Self{ .hasher = HashEngine(h).init(.{}) };
+            result.buf = bytes;
+            return result;
+        }
+
+        /// Compute the hash of the given data
+        pub fn hash(data: []const u8) Self {
+            var result = Self{ .hasher = HashEngine(h).init(.{}) };
+            HashEngine(h).hash(data, &result.buf);
+            return result;
+        }
+
+        /// Convert to hex string
+        pub fn toHex(self: *const Self) [digest_size * 2]u8 {
+            return hex(&self.buf);
+        }
+
+        /// Convert to hex string (reversed byte order, like Bitcoin txid display)
+        pub fn toHexReversed(self: *const Self) [digest_size * 2]u8 {
+            var reversed: [digest_size]u8 = undefined;
+            for (0..digest_size) |i| {
+                reversed[i] = self.buf[digest_size - 1 - i];
+            }
+            return hex(&reversed);
+        }
+
+        /// Get the underlying bytes
+        pub fn asBytes(self: *const Self) *const [digest_size]u8 {
+            return &self.buf;
+        }
+
+        /// Check if two hashes are equal
+        pub fn eql(self: *const Self, other: *const Self) bool {
+            return std.mem.eql(u8, &self.buf, &other.buf);
+        }
+
+        /// Check if the hash is all zeros
+        pub fn isZero(self: *const Self) bool {
+            for (self.buf) |byte| {
+                if (byte != 0) return false;
+            }
+            return true;
         }
     };
 }
@@ -217,10 +282,6 @@ test "hash engine" {
     // Create buffer for the hash output
     var hash: [32]u8 = undefined;
     engine.finish(&hash); // Pass the address of the hash array
-
-    // Print the hash in hexadecimal format
-    const hex_hash = try hex(&hash);
-    std.debug.print("hash: {s}\n", .{hex_hash});
 
     // Create expected hash for comparison
     var expected: [32]u8 = undefined;
@@ -238,14 +299,14 @@ test "sha256d" {
     engine.update(message);
     var hash: [32]u8 = undefined;
     engine.finish(&hash);
-    const hexHash = try hex(&hash);
-    std.debug.print("{s}\n", .{hexHash});
+    const hexHash = hex(&hash);
+    try std.testing.expectEqualSlices(u8, "a51a910ecba8a599555b32133bf1829455d55fe576677b49cb561d874077385c", &hexHash);
 }
 
 test "ripemd160" {
     const message = "message digest";
     var hash: [20]u8 = undefined;
     HashEngine(HashType.ripemd160).hash(message, &hash);
-    const hexHash = try hex(&hash);
-    try std.testing.expectEqualSlices(u8, "5d0689ef49d2fae572b881b123a85ffa21595f36", hexHash);
+    const hexHash = hex(&hash);
+    try std.testing.expectEqualSlices(u8, "5d0689ef49d2fae572b881b123a85ffa21595f36", &hexHash);
 }

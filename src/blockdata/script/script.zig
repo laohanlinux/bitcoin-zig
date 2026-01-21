@@ -1,5 +1,4 @@
 const std = @import("std");
-const convert = @import("tools").usizeToU8;
 
 pub const OpCodeType = enum(u16) {
     // push value
@@ -253,10 +252,19 @@ pub const OpCodeType = enum(u16) {
         }
     }
 
-    pub fn to_u8(self: OpCodeType) u8 {
-        return convert.usizeToU8(self.to_usize());
+    /// Create an OpCodeType from a raw byte value
+    pub fn init(value: u8) OpCodeType {
+        return @enumFromInt(value);
     }
 
+    /// Convert to u8
+    pub fn to_u8(self: OpCodeType) u8 {
+        const val = @intFromEnum(self);
+        if (val > 255) return 0xFF;
+        return @intCast(val);
+    }
+
+    /// Convert to usize
     pub fn to_usize(self: OpCodeType) usize {
         return @intFromEnum(self);
     }

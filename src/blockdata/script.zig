@@ -27,6 +27,14 @@ pub const Script = struct {
         };
     }
 
+    /// Create a default (empty) script
+    pub fn default(allocator: std.mem.Allocator) Script {
+        return Script{
+            .bytes = &[_]u8{},
+            .allocator = allocator,
+        };
+    }
+
     /// Create script from existing bytes
     pub fn fromBytes(allocator: std.mem.Allocator, bytes: []const u8) !Script {
         const scriptBytes = try allocator.dupe(u8, bytes);
